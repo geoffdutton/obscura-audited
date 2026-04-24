@@ -2314,6 +2314,9 @@ class _Canvas2D {
   }
   _parseColor(css) {
     if (!css || css === 'none') return [0,0,0,0];
+    // CanvasGradient / CanvasPattern are valid fillStyle/strokeStyle values
+    // per spec — treat as opaque black rather than crashing on .startsWith.
+    if (typeof css !== 'string') return [0,0,0,255];
     if (css.startsWith('#')) {
       const hex = css.slice(1);
       if (hex.length === 3) return [parseInt(hex[0]+hex[0],16),parseInt(hex[1]+hex[1],16),parseInt(hex[2]+hex[2],16),255];

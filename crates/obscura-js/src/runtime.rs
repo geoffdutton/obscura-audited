@@ -2065,4 +2065,45 @@ mod tests {
             offset
         );
     }
+
+    #[test]
+    fn test_canvas_fill_with_gradient_does_not_throw() {
+        // CanvasGradient is a valid fillStyle per spec; _parseColor must not
+        // crash on it. CreepJS's drawOutlineOfText hits this path.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt
+            .evaluate(
+                r#"(function() {
+                    try {
+                        const c = document.createElement('canvas'); c.width=100; c.height=100;
+                        const ctx = c.getContext('2d');
+                        const g = ctx.createLinearGradient(0,0,100,0);
+                        g.addColorStop(0,'red'); g.addColorStop(1,'blue');
+                        ctx.fillStyle = g;
+                        ctx.fillRect(0,0,100,100);
+                        ctx.fillText('x',10,10);
+                        return 'ok';
+                    } catch(e) { return 'threw:' + e.message; }
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!("ok"));
+    }
+
+    #[test]
+    fn test_canvas_parsecolor_handles_object_fillstyle() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt
+            .evaluate(
+                r#"(function() {
+                    const c = document.createElement('canvas');
+                    const ctx = c.getContext('2d');
+                    ctx.fillStyle = ctx.createPattern(c, 'repeat');
+                    try { ctx._parseColor(ctx.fillStyle); return 'ok'; }
+                    catch(e) { return 'threw:' + e.message; }
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!("ok"));
+    }
 }
