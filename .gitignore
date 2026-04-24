@@ -30,3 +30,4 @@ Cargo.lock.bak
 lcov.info
 
 .claude/settings.local.json
+.claude.local.md
