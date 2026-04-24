@@ -8,7 +8,8 @@ pub mod wreq_client;
 
 pub use blocklist::is_blocked as is_tracker_blocked;
 pub use client::{
-    validate_public_url, ObscuraHttpClient, ObscuraNetError, RequestInfo, ResourceType, Response,
+    classify_address_space, validate_pna, AddressSpace, ObscuraHttpClient, ObscuraNetError,
+    RequestInfo, RequestInitiator, ResourceType, Response,
 };
 pub use cookies::{CookieInfo, CookieJar};
 pub use robots::RobotsCache;

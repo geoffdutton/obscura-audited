@@ -7,7 +7,7 @@ use deno_core::op2;
 use deno_core::Extension;
 use deno_core::OpState;
 use obscura_dom::{DomTree, NodeData, NodeId};
-use obscura_net::{validate_public_url, CookieJar, ObscuraHttpClient};
+use obscura_net::{validate_pna, CookieJar, ObscuraHttpClient, RequestInitiator};
 use tokio::sync::Mutex;
 
 pub type InterceptCallback = Arc<
@@ -385,7 +385,13 @@ async fn op_fetch_url(
     );
 
     if let Ok(parsed_url) = url::Url::parse(&url) {
-        if let Err(e) = validate_public_url(&parsed_url) {
+        // op_fetch_url is only invoked from page JS (window.fetch), so this
+        // is always page-initiated. Parse the initiator origin; if it's
+        // missing or malformed, fall back to a synthetic public URL so the
+        // most restrictive PNA rules apply.
+        let initiator_url = url::Url::parse(&origin)
+            .unwrap_or_else(|_| url::Url::parse("https://unknown.invalid").unwrap());
+        if let Err(e) = validate_pna(&parsed_url, RequestInitiator::Page(&initiator_url)) {
             return Ok(serde_json::json!({
                 "status": 0,
                 "body": "",

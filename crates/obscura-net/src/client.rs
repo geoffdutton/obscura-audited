@@ -63,12 +63,91 @@ pub enum ResourceType {
 pub type RequestCallback = Arc<dyn Fn(&RequestInfo) + Send + Sync>;
 pub type ResponseCallback = Arc<dyn Fn(&RequestInfo, &Response) + Send + Sync>;
 
-/// Reject URLs that target loopback, private, link-local, broadcast, or
-/// documentation addresses. Shared by the HTTP client, the JS `fetch` op,
-/// and the ES-module loader so every outbound request path applies the
-/// same SSRF filter.
-pub fn validate_public_url(url: &Url) -> Result<(), String> {
-    let scheme = url.scheme();
+/// Address-space classification for Private Network Access (PNA) checks.
+///
+/// Mirrors Chromium's three-tier model: `Public` (internet), `Private`
+/// (RFC1918, link-local, ULA IPv6), `Local` (loopback, `localhost`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddressSpace {
+    Public,
+    Private,
+    Local,
+}
+
+impl AddressSpace {
+    /// Lower rank = more private. A request is blocked when the target rank
+    /// is strictly less than the initiator rank.
+    fn privacy_rank(self) -> u8 {
+        match self {
+            AddressSpace::Local => 0,
+            AddressSpace::Private => 1,
+            AddressSpace::Public => 2,
+        }
+    }
+}
+
+fn ipv6_is_unique_local(ip: &std::net::Ipv6Addr) -> bool {
+    (ip.octets()[0] & 0xfe) == 0xfc
+}
+
+/// Classify a URL's host into one of Chromium's PNA address spaces. URLs with
+/// no host (e.g. `data:`, `about:blank`) are classified as `Public` so that
+/// requests originating from them are treated conservatively.
+pub fn classify_address_space(url: &Url) -> AddressSpace {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => {
+            if ip.is_loopback() {
+                AddressSpace::Local
+            } else if ip.is_private()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_documentation()
+            {
+                AddressSpace::Private
+            } else {
+                AddressSpace::Public
+            }
+        }
+        Some(url::Host::Ipv6(ip)) => {
+            if ip.is_loopback() {
+                AddressSpace::Local
+            } else if ip.is_unicast_link_local() || ipv6_is_unique_local(&ip) {
+                AddressSpace::Private
+            } else {
+                AddressSpace::Public
+            }
+        }
+        Some(url::Host::Domain(domain)) => {
+            let lower = domain.to_lowercase();
+            if lower == "localhost" || lower.ends_with(".localhost") {
+                AddressSpace::Local
+            } else {
+                AddressSpace::Public
+            }
+        }
+        None => AddressSpace::Public,
+    }
+}
+
+/// Context in which an outbound request is being made.
+///
+/// `TopLevel` is a user-initiated navigation (CLI `obscura fetch`, the initial
+/// page load). Chromium does not apply PNA to top-level navigations, and
+/// neither do we — scheme restrictions still apply.
+///
+/// `Page(&Url)` is a page-initiated subresource request (`fetch()`, `import`,
+/// `<script src>`, `<link rel=stylesheet>`). The initiator URL's address space
+/// gates access to more-private targets.
+pub enum RequestInitiator<'a> {
+    TopLevel,
+    Page(&'a Url),
+}
+
+/// Enforce PNA: block page-initiated requests that step toward a more-private
+/// address space than the initiator. Top-level navigations are subject only
+/// to scheme restrictions.
+pub fn validate_pna(target: &Url, initiator: RequestInitiator<'_>) -> Result<(), String> {
+    let scheme = target.scheme();
     if scheme != "http" && scheme != "https" {
         return Err(format!(
             "Forbidden URL scheme '{}' - only http and https are allowed",
@@ -76,50 +155,26 @@ pub fn validate_public_url(url: &Url) -> Result<(), String> {
         ));
     }
 
-    if let Some(host) = url.host() {
-        match host {
-            url::Host::Ipv4(ip) => {
-                if ip.is_loopback()
-                    || ip.is_private()
-                    || ip.is_link_local()
-                    || ip.is_broadcast()
-                    || ip.is_documentation()
-                {
-                    return Err(format!(
-                        "Access to private/internal IP address {} is not allowed",
-                        ip
-                    ));
-                }
-            }
-            url::Host::Ipv6(ip) => {
-                if ip.is_loopback() || ip.is_unicast_link_local() {
-                    return Err(format!(
-                        "Access to private/internal IPv6 address {} is not allowed",
-                        ip
-                    ));
-                }
-            }
-            url::Host::Domain(domain) => {
-                let lower_domain = domain.to_lowercase();
-                if lower_domain == "localhost"
-                    || lower_domain.ends_with(".localhost")
-                    || lower_domain == "127.0.0.1"
-                    || lower_domain == "::1"
-                {
-                    return Err(format!(
-                        "Access to localhost domain '{}' is not allowed",
-                        domain
-                    ));
-                }
-            }
-        }
+    let initiator_url = match initiator {
+        RequestInitiator::TopLevel => return Ok(()),
+        RequestInitiator::Page(url) => url,
+    };
+
+    let initiator_space = classify_address_space(initiator_url);
+    let target_space = classify_address_space(target);
+
+    if target_space.privacy_rank() < initiator_space.privacy_rank() {
+        return Err(format!(
+            "Private Network Access: page at {} ({:?}) may not request {} ({:?})",
+            initiator_url, initiator_space, target, target_space,
+        ));
     }
 
     Ok(())
 }
 
-fn validate_url(url: &Url) -> Result<(), ObscuraNetError> {
-    validate_public_url(url).map_err(ObscuraNetError::Network)
+fn validate_url(url: &Url, initiator: RequestInitiator<'_>) -> Result<(), ObscuraNetError> {
+    validate_pna(url, initiator).map_err(ObscuraNetError::Network)
 }
 
 pub struct ObscuraHttpClient {
@@ -183,12 +238,27 @@ impl ObscuraHttpClient {
     }
 
     pub async fn fetch(&self, url: &Url) -> Result<Response, ObscuraNetError> {
-        self.fetch_with_method(Method::GET, url, None).await
+        self.fetch_with_method(Method::GET, url, None, RequestInitiator::TopLevel)
+            .await
+    }
+
+    pub async fn fetch_subresource(
+        &self,
+        url: &Url,
+        initiator: &Url,
+    ) -> Result<Response, ObscuraNetError> {
+        self.fetch_with_method(Method::GET, url, None, RequestInitiator::Page(initiator))
+            .await
     }
 
     pub async fn post_form(&self, url: &Url, body: &str) -> Result<Response, ObscuraNetError> {
-        self.fetch_with_method(Method::POST, url, Some(body.as_bytes().to_vec()))
-            .await
+        self.fetch_with_method(
+            Method::POST,
+            url,
+            Some(body.as_bytes().to_vec()),
+            RequestInitiator::TopLevel,
+        )
+        .await
     }
 
     pub async fn fetch_with_method(
@@ -196,8 +266,19 @@ impl ObscuraHttpClient {
         initial_method: Method,
         url: &Url,
         initial_body: Option<Vec<u8>>,
+        initiator: RequestInitiator<'_>,
     ) -> Result<Response, ObscuraNetError> {
-        validate_url(url)?;
+        validate_url(
+            url,
+            match initiator {
+                RequestInitiator::TopLevel => RequestInitiator::TopLevel,
+                RequestInitiator::Page(u) => RequestInitiator::Page(u),
+            },
+        )?;
+        let redirect_initiator = match initiator {
+            RequestInitiator::TopLevel => None,
+            RequestInitiator::Page(u) => Some(u.clone()),
+        };
 
         let mut method = initial_method;
         let mut body = initial_body;
@@ -365,7 +446,11 @@ impl ObscuraHttpClient {
                     let next_url = current_url.join(location_str).map_err(|e| {
                         ObscuraNetError::Network(format!("Invalid redirect URL: {}", e))
                     })?;
-                    validate_url(&next_url)?;
+                    let redirect_ctx = match redirect_initiator.as_ref() {
+                        Some(u) => RequestInitiator::Page(u),
+                        None => RequestInitiator::TopLevel,
+                    };
+                    validate_url(&next_url, redirect_ctx)?;
                     redirects.push(current_url.clone());
                     current_url = next_url;
                     if status == reqwest::StatusCode::MOVED_PERMANENTLY
@@ -436,4 +521,215 @@ pub enum ObscuraNetError {
 
     #[error("Request blocked: {0}")]
     Blocked(String),
+}
+
+#[cfg(test)]
+mod pna_tests {
+    use super::*;
+
+    fn u(s: &str) -> Url {
+        Url::parse(s).expect("valid URL")
+    }
+
+    #[test]
+    fn classifies_ipv4_loopback_as_local() {
+        assert_eq!(
+            classify_address_space(&u("http://127.0.0.1/")),
+            AddressSpace::Local
+        );
+        assert_eq!(
+            classify_address_space(&u("http://127.0.0.5/")),
+            AddressSpace::Local
+        );
+    }
+
+    #[test]
+    fn classifies_ipv6_loopback_as_local() {
+        assert_eq!(
+            classify_address_space(&u("http://[::1]/")),
+            AddressSpace::Local
+        );
+    }
+
+    #[test]
+    fn classifies_localhost_hostname_as_local() {
+        assert_eq!(
+            classify_address_space(&u("http://localhost/")),
+            AddressSpace::Local
+        );
+        assert_eq!(
+            classify_address_space(&u("http://LOCALHOST/")),
+            AddressSpace::Local
+        );
+        assert_eq!(
+            classify_address_space(&u("http://foo.localhost/")),
+            AddressSpace::Local
+        );
+    }
+
+    #[test]
+    fn classifies_rfc1918_as_private() {
+        assert_eq!(
+            classify_address_space(&u("http://10.0.0.1/")),
+            AddressSpace::Private
+        );
+        assert_eq!(
+            classify_address_space(&u("http://192.168.1.1/")),
+            AddressSpace::Private
+        );
+        assert_eq!(
+            classify_address_space(&u("http://172.16.0.1/")),
+            AddressSpace::Private
+        );
+        assert_eq!(
+            classify_address_space(&u("http://172.31.255.255/")),
+            AddressSpace::Private
+        );
+    }
+
+    #[test]
+    fn classifies_edge_of_rfc1918_correctly() {
+        assert_eq!(
+            classify_address_space(&u("http://172.15.0.1/")),
+            AddressSpace::Public
+        );
+        assert_eq!(
+            classify_address_space(&u("http://172.32.0.1/")),
+            AddressSpace::Public
+        );
+    }
+
+    #[test]
+    fn classifies_ipv4_link_local_as_private() {
+        assert_eq!(
+            classify_address_space(&u("http://169.254.1.1/")),
+            AddressSpace::Private
+        );
+        assert_eq!(
+            classify_address_space(&u("http://169.254.169.254/")),
+            AddressSpace::Private
+        );
+    }
+
+    #[test]
+    fn classifies_ipv6_ula_as_private() {
+        assert_eq!(
+            classify_address_space(&u("http://[fc00::1]/")),
+            AddressSpace::Private
+        );
+        assert_eq!(
+            classify_address_space(&u("http://[fd12:3456::1]/")),
+            AddressSpace::Private
+        );
+    }
+
+    #[test]
+    fn classifies_ipv6_link_local_as_private() {
+        assert_eq!(
+            classify_address_space(&u("http://[fe80::1]/")),
+            AddressSpace::Private
+        );
+    }
+
+    #[test]
+    fn classifies_public_addresses_as_public() {
+        assert_eq!(
+            classify_address_space(&u("http://8.8.8.8/")),
+            AddressSpace::Public
+        );
+        assert_eq!(
+            classify_address_space(&u("http://example.com/")),
+            AddressSpace::Public
+        );
+        assert_eq!(
+            classify_address_space(&u("http://[2001:db8::1]/")),
+            AddressSpace::Public
+        );
+    }
+
+    #[test]
+    fn rejects_non_http_scheme_regardless_of_initiator() {
+        assert!(validate_pna(&u("file:///etc/passwd"), RequestInitiator::TopLevel).is_err());
+        assert!(validate_pna(&u("ftp://example.com/"), RequestInitiator::TopLevel).is_err());
+        let page = u("https://example.com/");
+        assert!(validate_pna(&u("file:///etc/passwd"), RequestInitiator::Page(&page)).is_err());
+    }
+
+    #[test]
+    fn top_level_navigation_allowed_to_any_space() {
+        assert!(validate_pna(&u("http://localhost:3000/"), RequestInitiator::TopLevel).is_ok());
+        assert!(validate_pna(&u("http://127.0.0.1/"), RequestInitiator::TopLevel).is_ok());
+        assert!(validate_pna(&u("http://192.168.1.1/"), RequestInitiator::TopLevel).is_ok());
+        assert!(validate_pna(&u("http://169.254.169.254/"), RequestInitiator::TopLevel).is_ok());
+        assert!(validate_pna(&u("https://example.com/"), RequestInitiator::TopLevel).is_ok());
+    }
+
+    #[test]
+    fn page_public_to_local_is_blocked() {
+        let page = u("https://example.com/");
+        let err = validate_pna(&u("http://localhost:3000/"), RequestInitiator::Page(&page))
+            .expect_err("public page must not reach localhost");
+        assert!(err.contains("Private Network Access"), "got: {}", err);
+
+        assert!(validate_pna(&u("http://127.0.0.1/"), RequestInitiator::Page(&page)).is_err());
+        assert!(validate_pna(&u("http://[::1]/"), RequestInitiator::Page(&page)).is_err());
+    }
+
+    #[test]
+    fn page_public_to_private_is_blocked() {
+        let page = u("https://example.com/");
+        assert!(validate_pna(&u("http://10.0.0.1/"), RequestInitiator::Page(&page)).is_err());
+        assert!(
+            validate_pna(&u("http://169.254.169.254/"), RequestInitiator::Page(&page)).is_err()
+        );
+        assert!(validate_pna(&u("http://192.168.1.1/"), RequestInitiator::Page(&page)).is_err());
+    }
+
+    #[test]
+    fn page_public_to_public_is_allowed() {
+        let page = u("https://example.com/");
+        assert!(validate_pna(
+            &u("https://other.example.org/"),
+            RequestInitiator::Page(&page)
+        )
+        .is_ok());
+        assert!(validate_pna(&u("http://8.8.8.8/"), RequestInitiator::Page(&page)).is_ok());
+    }
+
+    #[test]
+    fn page_private_to_local_is_blocked() {
+        let page = u("http://10.0.0.5/");
+        assert!(validate_pna(&u("http://localhost/"), RequestInitiator::Page(&page)).is_err());
+        assert!(validate_pna(&u("http://127.0.0.1/"), RequestInitiator::Page(&page)).is_err());
+    }
+
+    #[test]
+    fn page_private_to_private_is_allowed() {
+        let page = u("http://10.0.0.5/");
+        assert!(validate_pna(&u("http://192.168.1.1/"), RequestInitiator::Page(&page)).is_ok());
+        assert!(validate_pna(&u("http://10.0.0.6/"), RequestInitiator::Page(&page)).is_ok());
+    }
+
+    #[test]
+    fn page_private_to_public_is_allowed() {
+        let page = u("http://10.0.0.5/");
+        assert!(validate_pna(&u("https://example.com/"), RequestInitiator::Page(&page)).is_ok());
+    }
+
+    #[test]
+    fn page_local_to_anything_is_allowed() {
+        let page = u("http://localhost:3000/");
+        assert!(validate_pna(&u("http://127.0.0.1/"), RequestInitiator::Page(&page)).is_ok());
+        assert!(validate_pna(&u("http://10.0.0.1/"), RequestInitiator::Page(&page)).is_ok());
+        assert!(validate_pna(&u("https://example.com/"), RequestInitiator::Page(&page)).is_ok());
+    }
+
+    #[test]
+    fn unparseable_origin_treated_as_public_initiator() {
+        // A page with no host (e.g. data: or about:blank) should default to the
+        // most restrictive initiator so it cannot reach private networks.
+        let no_host = u("data:text/html,hello");
+        assert!(validate_pna(&u("http://localhost/"), RequestInitiator::Page(&no_host)).is_err());
+        assert!(validate_pna(&u("https://example.com/"), RequestInitiator::Page(&no_host)).is_ok());
+    }
 }
