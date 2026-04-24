@@ -98,24 +98,20 @@ shape that this approach cannot replicate.
 
 ---
 
-## 🔴 Critical — `Element.*` prototype descriptors missing (100+ checks)
+## ✅ Fixed — `Element.*` prototype descriptors (Rule 2)
 
-**CreepJS: "failed descriptor.value undefined" on virtually every Element property**
+**Previously:** CreepJS reported "failed descriptor.value undefined" on virtually every Element property.
 
-```
-innerHTML, className, style, children, clientWidth, offsetWidth,
-childElementCount, dataset, id, tagName, outerHTML, innerText, ...
-```
+`bootstrap.js` now re-publishes all 37 names from the golden list
+(`tests/fixtures/detect/element_prototype.json`) as own enumerable accessor
+descriptors on `Element.prototype`. Properties that already had class-level
+getters/setters are re-published with `enumerable: true, configurable: true`
+to match the browser shape. Properties with no class-level backing
+(`attributes`, `shadowRoot`, `slot`, `part`, `role`, `prefix`, `clientLeft`,
+`clientTop`, `offsetParent`, `assignedSlot`) get a type-correct default getter
+so `Object.getOwnPropertyDescriptor` returns a real descriptor.
 
-CreepJS checks `Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML')` etc. Since element
-properties in Obscura are JavaScript-level own-properties on instances rather than getter/setter
-descriptors on `Element.prototype`, the descriptor lookups return `undefined`.
-
-Real browsers define all these as prototype-level accessors, e.g.:
-```js
-Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML')
-// → { get: ƒ, set: ƒ, enumerable: true, configurable: true }
-```
+Verification fixture: `tests/fixtures/detect/element_descriptors.html` (asserts `missing.length === 0`).
 
 ---
 
@@ -292,8 +288,8 @@ multiple lines.
 ```
 
 260 detected lies is very high — any real anti-bot system scoring on creepjs data would flag this
-immediately. The dominant sources are the Deno runtime leakage, `Function.toString` masking
-failures, and missing Element prototype descriptors.
+immediately. The dominant sources are the Deno runtime leakage and `Function.toString` masking
+failures. (Element prototype descriptor failures addressed by Rule 2 fix.)
 
 ---
 
