@@ -2721,18 +2721,10 @@ Element.prototype.getContext = function getContext(type) {
 Element.prototype.toDataURL = function(type) {
   if (this._ctx && this._ctx._buf) {
     const ctx = this._ctx;
-    const w = ctx._w, h = ctx._h, buf = ctx._buf;
-    let hash = _fpSeed;
-    for (let i = 0; i < buf.length; i += 37) {
-      hash = ((hash << 5) - hash + buf[i]) | 0;
-    }
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    let b64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg';
-    for (let i = 0; i < 60; i++) {
-      hash = ((hash << 5) - hash + i) | 0;
-      b64 += chars[(hash >>> 0) % 64];
-    }
-    return b64 + '==';
+    const w = ctx._w, h = ctx._h;
+    // Pass a copy so the op's buffer detach does not destroy the canvas state.
+    const b64 = _Deno.core.ops.op_canvas_encode_png(w, h, new Uint8Array(ctx._buf));
+    return 'data:image/png;base64,' + b64;
   }
   return _fp('canvasFingerprint');
 };
