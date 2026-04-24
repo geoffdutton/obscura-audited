@@ -46,17 +46,13 @@ Requires Rust 1.75+ ([rustup.rs](https://rustup.rs)). First build takes ~5 min (
 
 #### Stealth build on macOS / Windows
 
-`--features stealth` depends on `wreq` → `boring-sys2`, whose symbol-prefixing is broken on macOS/Windows. Use a Linux container:
+`--features stealth` depends on `wreq` → `boring-sys2`, whose symbol-prefixing is broken on macOS/Windows. Use the Docker wrapper to build and run the Linux stealth binary:
 
 ```bash
-docker run --rm \
-  -v "$PWD":/src -w /src \
-  -v obscura-cargo-registry:/usr/local/cargo/registry \
-  -v obscura-linux-target:/src/target \
-  rust:1.95 cargo build --release --features stealth
+./obscura-stealth-docker fetch https://example.com
 ```
 
-The same wrapper runs the bot-detection check (`scripts/verify-stealth.sh`). The named volumes cache the cargo registry and the Linux target dir across runs.
+The wrapper builds `scripts/Dockerfile.stealth` if needed and caches cargo's registry plus the Linux target dir in named Docker volumes across runs.
 
 ## Quick Start
 

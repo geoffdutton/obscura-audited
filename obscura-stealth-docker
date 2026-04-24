@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Run the obscura CLI with the Linux-only stealth feature through Docker.
+#
+# Usage:
+#   ./obscura-stealth-docker fetch https://example.com
+#   ./obscura-stealth-docker scrape https://example.com --selector title
+#   ./obscura-stealth-docker --wrapper-help
+
+set -euo pipefail
+
+IMAGE="${OBSCURA_STEALTH_IMAGE:-obscura-stealth}"
+REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "${1:-}" == "--wrapper-help" ]]; then
+  cat <<EOF
+Usage:
+  ./obscura-stealth-docker <obscura args...>
+
+Examples:
+  ./obscura-stealth-docker fetch https://example.com
+  ./obscura-stealth-docker scrape https://example.com --selector title
+  ./obscura-stealth-docker serve --host 127.0.0.1 --port 9222
+
+This builds/runs the Linux stealth binary in Docker because the stealth TLS
+dependency does not link on macOS/Windows. Set OBSCURA_STEALTH_IMAGE to use a
+different image tag.
+EOF
+  exit 0
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "ERROR: docker command not found. Install Docker Desktop, OrbStack, Rancher Desktop, or Colima." >&2
+  exit 127
+fi
+
+if ! docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+  echo "ERROR: Docker daemon is not reachable. Start your Docker backend and retry." >&2
+  exit 1
+fi
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "Building Docker image $IMAGE..." >&2
+  docker build -t "$IMAGE" -f "$REPO_DIR/scripts/Dockerfile.stealth" "$REPO_DIR"
+fi
+
+exec docker run --rm \
+  -v "$REPO_DIR":/src \
+  -v obscura-cargo-registry:/usr/local/cargo/registry \
+  -v obscura-linux-target:/src/target \
+  -w /src \
+  "$IMAGE" \
+  bash -c 'echo "Building obscura (release, --features stealth)..." >&2; cargo build --release --features stealth && exec ./target/release/obscura "$@"' \
+  obscura \
+  "$@"
