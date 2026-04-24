@@ -1898,4 +1898,43 @@ mod tests {
             serde_json::json!(["function", "function", "function", "function"])
         );
     }
+
+    #[test]
+    fn test_chrome_object_shape_matches_browser() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("typeof window.chrome.app.isInstalled").unwrap(),
+            serde_json::json!("boolean")
+        );
+        assert_eq!(
+            rt.evaluate("window.chrome.app.isInstalled").unwrap(),
+            serde_json::json!(false)
+        );
+        let install_states = rt
+            .evaluate("Object.keys(window.chrome.app.InstallState).sort()")
+            .unwrap();
+        assert_eq!(
+            install_states,
+            serde_json::json!(["DISABLED", "INSTALLED", "NOT_INSTALLED"])
+        );
+        let run_states = rt
+            .evaluate("Object.keys(window.chrome.app.RunningState).sort()")
+            .unwrap();
+        assert_eq!(
+            run_states,
+            serde_json::json!(["CANNOT_RUN", "READY_TO_RUN", "RUNNING"])
+        );
+        let installed_reason = rt
+            .evaluate("Object.keys(window.chrome.runtime.OnInstalledReason).sort()")
+            .unwrap();
+        assert_eq!(
+            installed_reason,
+            serde_json::json!(["CHROME_UPDATE", "INSTALL", "SHARED_MODULE_UPDATE", "UPDATE"])
+        );
+        // chrome.runtime.id is undefined in non-extension page contexts.
+        assert_eq!(
+            rt.evaluate("typeof window.chrome.runtime.id").unwrap(),
+            serde_json::json!("undefined")
+        );
+    }
 }

@@ -1203,10 +1203,40 @@ globalThis.navigator = {
 };
 
 globalThis.chrome = {
-  app: { isInstalled: false, InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" }, RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" } },
-  runtime: { OnInstalledReason: {}, OnRestartRequiredReason: {}, PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {}, connect() { return {}; }, sendMessage() {} },
-  csi() { return {}; },
-  loadTimes() { return {}; },
+  app: {
+    isInstalled: false,
+    InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" },
+    RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" },
+    getDetails() { return null; },
+    getIsInstalled() { return false; },
+    runningState() { return "cannot_run"; },
+  },
+  runtime: {
+    // id is intentionally undefined — real Chrome exposes chrome.runtime in page
+    // context but chrome.runtime.id is only set inside extensions.
+    OnInstalledReason: {
+      CHROME_UPDATE: "chrome_update", INSTALL: "install",
+      SHARED_MODULE_UPDATE: "shared_module_update", UPDATE: "update",
+    },
+    OnRestartRequiredReason: { APP_UPDATE: "app_update", OS_UPDATE: "os_update", PERIODIC: "periodic" },
+    PlatformArch: { ARM: "arm", ARM64: "arm64", MIPS: "mips", MIPS64: "mips64", X86_32: "x86-32", X86_64: "x86-64" },
+    PlatformNaclArch: { ARM: "arm", MIPS: "mips", MIPS64: "mips64", X86_32: "x86-32", X86_64: "x86-64" },
+    PlatformOs: { ANDROID: "android", CROS: "cros", LINUX: "linux", MAC: "mac", OPENBSD: "openbsd", WIN: "win" },
+    RequestUpdateCheckStatus: { NO_UPDATE: "no_update", THROTTLED: "throttled", UPDATE_AVAILABLE: "update_available" },
+    connect() { return { onMessage: { addListener(){}, removeListener(){} }, postMessage(){}, disconnect(){} }; },
+    sendMessage() {},
+  },
+  csi() { return { onloadT: Date.now(), pageT: Date.now(), startE: Date.now(), tran: 15 }; },
+  loadTimes() {
+    const t = Date.now() / 1000;
+    return {
+      requestTime: t - 0.5, startLoadTime: t - 0.4, commitLoadTime: t - 0.3,
+      finishDocumentLoadTime: t - 0.2, finishLoadTime: t - 0.1, firstPaintTime: t - 0.05,
+      firstPaintAfterLoadTime: 0, navigationType: "Other", wasFetchedViaSpdy: false,
+      wasNpnNegotiated: true, npnNegotiatedProtocol: "h2", wasAlternateProtocolAvailable: false,
+      connectionInfo: "h2",
+    };
+  },
 };
 
 globalThis.Notification = class Notification {
