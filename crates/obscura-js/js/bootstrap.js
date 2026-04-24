@@ -43,10 +43,9 @@ globalThis.dispatchEvent = function(event) {
   return !event.defaultPrevented;
 };
 
-// Capture and immediately remove Deno from globalThis — closes the pre-init window
-// where page scripts could detect the Deno runtime.
+// Capture the Deno runtime reference; globalThis.Deno is deleted at the start
+// of init() (the earliest point after deno_core finishes its own setup).
 const _Deno = globalThis.Deno;
-delete globalThis.Deno;
 
 const _dom = (cmd, a1, a2) => _Deno.core.ops.op_dom(cmd, String(a1 ?? ""), String(a2 ?? ""));
 
@@ -3316,6 +3315,7 @@ if (typeof Document !== 'undefined' && !Document.prototype.importNode) {
 }
 
 globalThis[_KEY].init = function() {
+  delete globalThis.Deno;
   _fpSeed = Date.now() ^ (Math.random() * 0xFFFFFFFF >>> 0);
   _fpCache = null;
 
@@ -3333,7 +3333,6 @@ globalThis[_KEY].init = function() {
   globalThis.performance.timeOrigin = t0;
   globalThis.performance.timing = { navigationStart: t0, domContentLoadedEventEnd: t0, loadEventEnd: t0 };
 
-  delete globalThis.Deno;
   delete globalThis[_KEY].init;
 };
 
