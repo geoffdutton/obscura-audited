@@ -57,9 +57,8 @@ impl ModuleLoader for ObscuraModuleLoader {
         let parsed = module_specifier.clone();
 
         ModuleLoadResponse::Async(Pin::from(Box::new(async move {
-            validate_public_url(&parsed).map_err(|e| {
-                io_err(format!("Refused to load module {}: {}", url, e))
-            })?;
+            validate_public_url(&parsed)
+                .map_err(|e| io_err(format!("Refused to load module {}: {}", url, e)))?;
 
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -83,9 +82,10 @@ impl ModuleLoader for ObscuraModuleLoader {
                 )));
             }
 
-            let code = resp.text().await.map_err(|e| {
-                io_err(format!("Failed to read module body {}: {}", url, e))
-            })?;
+            let code = resp
+                .text()
+                .await
+                .map_err(|e| io_err(format!("Failed to read module body {}: {}", url, e)))?;
 
             let specifier = ModuleSpecifier::parse(&url)
                 .map_err(|e| io_err(format!("Invalid module URL {}: {}", url, e)))?;

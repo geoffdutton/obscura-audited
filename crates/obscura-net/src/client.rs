@@ -165,21 +165,22 @@ impl ObscuraHttpClient {
     }
 
     async fn get_client(&self) -> &Client {
-        self.client.get_or_init(|| async {
-            let mut builder = Client::builder()
-                .redirect(Policy::none())
-                .timeout(Duration::from_secs(30))
-                .danger_accept_invalid_certs(false)
-;
+        self.client
+            .get_or_init(|| async {
+                let mut builder = Client::builder()
+                    .redirect(Policy::none())
+                    .timeout(Duration::from_secs(30))
+                    .danger_accept_invalid_certs(false);
 
-            if let Some(ref proxy) = self.proxy_url {
-                if let Ok(p) = reqwest::Proxy::all(proxy.as_str()) {
-                    builder = builder.proxy(p);
+                if let Some(ref proxy) = self.proxy_url {
+                    if let Ok(p) = reqwest::Proxy::all(proxy.as_str()) {
+                        builder = builder.proxy(p);
+                    }
                 }
-            }
 
-            builder.build().expect("failed to build HTTP client")
-        }).await
+                builder.build().expect("failed to build HTTP client")
+            })
+            .await
     }
 
     pub async fn fetch(&self, url: &Url) -> Result<Response, ObscuraNetError> {
@@ -187,7 +188,8 @@ impl ObscuraHttpClient {
     }
 
     pub async fn post_form(&self, url: &Url, body: &str) -> Result<Response, ObscuraNetError> {
-        self.fetch_with_method(Method::POST, url, Some(body.as_bytes().to_vec())).await
+        self.fetch_with_method(Method::POST, url, Some(body.as_bytes().to_vec()))
+            .await
     }
 
     pub async fn fetch_with_method(
@@ -262,7 +264,9 @@ impl ObscuraHttpClient {
             );
             headers.insert(
                 HeaderName::from_static("sec-ch-ua"),
-                HeaderValue::from_static("\"Chromium\";v=\"145\", \"Not;A=Brand\";v=\"24\", \"Google Chrome\";v=\"145\""),
+                HeaderValue::from_static(
+                    "\"Chromium\";v=\"145\", \"Not;A=Brand\";v=\"24\", \"Google Chrome\";v=\"145\"",
+                ),
             );
             headers.insert(
                 HeaderName::from_static("sec-ch-ua-mobile"),
@@ -309,7 +313,10 @@ impl ObscuraHttpClient {
                 }
             }
 
-            let mut req_builder = self.get_client().await.request(method.clone(), current_url.as_str())
+            let mut req_builder = self
+                .get_client()
+                .await
+                .request(method.clone(), current_url.as_str())
                 .headers(headers);
 
             if let Some(ref b) = body {
@@ -322,12 +329,15 @@ impl ObscuraHttpClient {
                 req_builder = req_builder.body(b.clone());
             }
 
-            self.in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.in_flight
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let resp = req_builder.send().await.map_err(|e| {
-                self.in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                self.in_flight
+                    .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                 ObscuraNetError::Network(format!("{}: {}", current_url, e))
             })?;
-            self.in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            self.in_flight
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
             let status = resp.status();
 
@@ -340,7 +350,12 @@ impl ObscuraHttpClient {
             let response_headers: HashMap<String, String> = resp
                 .headers()
                 .iter()
-                .map(|(k, v)| (k.as_str().to_lowercase(), v.to_str().unwrap_or("").to_string()))
+                .map(|(k, v)| {
+                    (
+                        k.as_str().to_lowercase(),
+                        v.to_str().unwrap_or("").to_string(),
+                    )
+                })
                 .collect();
 
             if status.is_redirection() {
@@ -365,9 +380,11 @@ impl ObscuraHttpClient {
                 }
             }
 
-            let body_bytes = resp.bytes().await.map_err(|e| {
-                ObscuraNetError::Network(format!("Failed to read body: {}", e))
-            })?.to_vec();
+            let body_bytes = resp
+                .bytes()
+                .await
+                .map_err(|e| ObscuraNetError::Network(format!("Failed to read body: {}", e)))?
+                .to_vec();
 
             let response = Response {
                 url: current_url,
