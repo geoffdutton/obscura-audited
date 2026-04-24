@@ -923,6 +923,20 @@ mod tests {
     }
 
     #[test]
+    fn test_deno_not_on_global() {
+        // After bootstrap, page scripts must not be able to detect Deno runtime.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt.evaluate("typeof Deno").unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!("undefined"),
+            "window.Deno must be deleted so pages cannot fingerprint the runtime"
+        );
+        let in_check = rt.evaluate("'Deno' in globalThis").unwrap();
+        assert_eq!(in_check, serde_json::json!(false));
+    }
+
+    #[test]
     fn test_webdriver_not_in_navigator() {
         // Real Chrome does not have webdriver property at all; 'in' check returns false.
         // Sannysoft detects the getter-defined property even though it returns undefined.

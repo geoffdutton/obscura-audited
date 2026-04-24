@@ -25,7 +25,10 @@ globalThis.dispatchEvent = function(event) {
   return !event.defaultPrevented;
 };
 
-const _dom = (cmd, a1, a2) => Deno.core.ops.op_dom(cmd, String(a1 ?? ""), String(a2 ?? ""));
+// Capture the Deno runtime reference before we delete it from globalThis.
+const _Deno = Deno;
+
+const _dom = (cmd, a1, a2) => _Deno.core.ops.op_dom(cmd, String(a1 ?? ""), String(a2 ?? ""));
 
 const _nativeFns = new Set();
 const _origToString = Function.prototype.toString;
@@ -122,7 +125,7 @@ const _formValues = globalThis._formValues;
 const _formChecked = globalThis._formChecked;
 const _domParse = (cmd, a1, a2) => { try { return JSON.parse(_dom(cmd, a1, a2)); } catch { return null; } };
 const _consoleFn = (level, args) => {
-  try { Deno.core.ops.op_console_msg(level, args.map(a => {
+  try { _Deno.core.ops.op_console_msg(level, args.map(a => {
     if (a === null) return "null";
     if (a === undefined) return "undefined";
     if (a instanceof Error) return a.stack || a.message || String(a);
@@ -265,7 +268,7 @@ class Node {
         const pageOrigin = (function() { try { return new URL(globalThis.location?.href || "about:blank").origin; } catch(e) { return ""; } })();
         (async () => {
           try {
-            const raw = await Deno.core.ops.op_fetch_url(fullUrl, "GET", "{}", "", pageOrigin, "no-cors");
+            const raw = await _Deno.core.ops.op_fetch_url(fullUrl, "GET", "{}", "", pageOrigin, "no-cors");
             const parsed = JSON.parse(raw);
             if (parsed.body) {
               try { (0, eval)(parsed.body); } catch(e) { console.error('Dynamic script error (' + fullUrl + '):', e.message); }
@@ -653,10 +656,10 @@ class Element extends Node {
 
     const encoded = pairs.join('&');
     if (method === 'POST') {
-      Deno.core.ops.op_navigate(targetUrl, 'POST', encoded);
+      _Deno.core.ops.op_navigate(targetUrl, 'POST', encoded);
     } else {
       const sep = targetUrl.includes('?') ? '&' : '?';
-      Deno.core.ops.op_navigate(targetUrl + (encoded ? sep + encoded : ''), 'GET', '');
+      _Deno.core.ops.op_navigate(targetUrl + (encoded ? sep + encoded : ''), 'GET', '');
     }
   }
   reset() {
@@ -717,7 +720,7 @@ class Document extends Node {
   get URL() { return _domParse("document_url") ?? ""; }
   get documentURI() { return this.URL; }
   get location() { return globalThis.location; }
-  set location(url) { Deno.core.ops.op_navigate(_resolveUrl(String(url)), 'GET', ''); }
+  set location(url) { _Deno.core.ops.op_navigate(_resolveUrl(String(url)), 'GET', ''); }
   get defaultView() { return globalThis; }
   get nodeType() { return 9; }
   get nodeName() { return "#document"; }
@@ -877,11 +880,11 @@ class Document extends Node {
   get links() { return []; }
   get scripts() { return this.querySelectorAll("script"); }
   get cookie() {
-    return Deno.core.ops.op_get_cookies();
+    return _Deno.core.ops.op_get_cookies();
   }
   set cookie(v) {
     if (!v) return;
-    Deno.core.ops.op_set_cookie(v);
+    _Deno.core.ops.op_set_cookie(v);
   }
   write(...args) {
     var html = args.join('');
@@ -963,7 +966,7 @@ function _resolveUrl(url) {
 }
 globalThis.location = {
   get href() { return _domParse("document_url") ?? "about:blank"; },
-  set href(url) { Deno.core.ops.op_navigate(_resolveUrl(url), 'GET', ''); },
+  set href(url) { _Deno.core.ops.op_navigate(_resolveUrl(url), 'GET', ''); },
   get origin() { try { return new URL(this.href).origin; } catch { return ""; } },
   get protocol() { try { return new URL(this.href).protocol; } catch { return ""; } },
   get host() { try { return new URL(this.href).host; } catch { return ""; } },
@@ -973,14 +976,14 @@ globalThis.location = {
   get hash() { try { return new URL(this.href).hash; } catch { return ""; } },
   get port() { try { return new URL(this.href).port; } catch { return ""; } },
   toString() { return this.href; },
-  assign(url) { Deno.core.ops.op_navigate(_resolveUrl(url), 'GET', ''); },
+  assign(url) { _Deno.core.ops.op_navigate(_resolveUrl(url), 'GET', ''); },
   reload() {},
-  replace(url) { Deno.core.ops.op_navigate(_resolveUrl(url), 'GET', ''); },
+  replace(url) { _Deno.core.ops.op_navigate(_resolveUrl(url), 'GET', ''); },
 };
 const _locationObj = globalThis.location;
 Object.defineProperty(globalThis, 'location', {
   get() { return _locationObj; },
-  set(url) { Deno.core.ops.op_navigate(_resolveUrl(String(url)), 'GET', ''); },
+  set(url) { _Deno.core.ops.op_navigate(_resolveUrl(String(url)), 'GET', ''); },
   configurable: false,
   enumerable: true,
 });
@@ -1125,7 +1128,7 @@ globalThis.fetch = async (input, init = {}) => {
   const body = init.body ? String(init.body) : "";
   const fetchMode = init.mode || (input instanceof Request ? input.mode : "cors");
   const pageOrigin = (function() { try { const u = new URL(_domParse("document_url") || "about:blank"); return u.origin; } catch(e) { return ""; } })();
-  const raw = await Deno.core.ops.op_fetch_url(url, method, hdrs, body, pageOrigin, fetchMode);
+  const raw = await _Deno.core.ops.op_fetch_url(url, method, hdrs, body, pageOrigin, fetchMode);
   const parsed = JSON.parse(raw);
   if (parsed.blocked) {
     const err = new TypeError('net::ERR_FAILED');
@@ -2977,5 +2980,6 @@ globalThis.__obscura_init = function() {
     try { Object.defineProperty(globalThis, p, { enumerable: false }); } catch(e) {
     }
   }
+  delete globalThis.Deno;
   delete globalThis.__obscura_init;
 };
