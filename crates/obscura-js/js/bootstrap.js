@@ -1061,6 +1061,70 @@ const _registerIframe = function(iframeEl) {
     enumerable: false,
   });
 };
+// Plugin / MimeType / PluginArray / MimeTypeArray constructors.
+// Sannysoft checks Object.prototype.toString.call(navigator.plugins) and expects
+// `[object PluginArray]`. A plain Array returns `[object Array]`, so we need
+// real classes whose Symbol.toStringTag fixes the toString tag.
+class Plugin {
+  constructor(data) { Object.assign(this, data); }
+  item(i) { return this[i] || null; }
+  namedItem(name) { return this[name] || null; }
+}
+Object.defineProperty(Plugin.prototype, Symbol.toStringTag, { value: 'Plugin' });
+_markNative(Plugin);
+
+class MimeType {
+  constructor(data) { Object.assign(this, data); }
+}
+Object.defineProperty(MimeType.prototype, Symbol.toStringTag, { value: 'MimeType' });
+_markNative(MimeType);
+
+class PluginArray {
+  constructor(items) {
+    for (let i = 0; i < items.length; i++) {
+      this[i] = items[i];
+      this[items[i].name] = items[i];
+    }
+    Object.defineProperty(this, 'length', { value: items.length, enumerable: false });
+  }
+  item(i) { return this[i] || null; }
+  namedItem(name) { return this[name] || null; }
+  refresh() {}
+  [Symbol.iterator]() {
+    let i = 0;
+    return { next: () => i < this.length
+      ? { value: this[i++], done: false }
+      : { value: undefined, done: true } };
+  }
+}
+Object.defineProperty(PluginArray.prototype, Symbol.toStringTag, { value: 'PluginArray' });
+_markNative(PluginArray);
+
+class MimeTypeArray {
+  constructor(items) {
+    for (let i = 0; i < items.length; i++) {
+      this[i] = items[i];
+      this[items[i].type] = items[i];
+    }
+    Object.defineProperty(this, 'length', { value: items.length, enumerable: false });
+  }
+  item(i) { return this[i] || null; }
+  namedItem(name) { return this[name] || null; }
+  [Symbol.iterator]() {
+    let i = 0;
+    return { next: () => i < this.length
+      ? { value: this[i++], done: false }
+      : { value: undefined, done: true } };
+  }
+}
+Object.defineProperty(MimeTypeArray.prototype, Symbol.toStringTag, { value: 'MimeTypeArray' });
+_markNative(MimeTypeArray);
+
+globalThis.Plugin = Plugin;
+globalThis.MimeType = MimeType;
+globalThis.PluginArray = PluginArray;
+globalThis.MimeTypeArray = MimeTypeArray;
+
 globalThis.navigator = {
   get userAgent() { return globalThis[_KEY].ua || "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"; },
   get appVersion() { return this.userAgent.replace('Mozilla/', ''); },
@@ -1073,26 +1137,22 @@ globalThis.navigator = {
   connection: { effectiveType: "4g", rtt: 50, downlink: 10, saveData: false },
   pdfViewerEnabled: true,
   get plugins() {
-    const p = [
-      { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-      { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-      { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-      { name: "Microsoft Edge PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-      { name: "WebKit built-in PDF", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
+    const pdfMime = new MimeType({ type: 'application/pdf', description: 'Portable Document Format', suffixes: 'pdf', enabledPlugin: null });
+    const items = [
+      new Plugin({ name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: pdfMime }),
+      new Plugin({ name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: pdfMime }),
+      new Plugin({ name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: pdfMime }),
+      new Plugin({ name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: pdfMime }),
+      new Plugin({ name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: pdfMime }),
     ];
-    p.item = (i) => p[i] || null;
-    p.namedItem = (name) => p.find(x => x.name === name) || null;
-    p.refresh = () => {};
-    return p;
+    return new PluginArray(items);
   },
   get mimeTypes() {
-    const m = [
-      { type: "application/pdf", description: "Portable Document Format", suffixes: "pdf", enabledPlugin: null },
-      { type: "text/pdf", description: "Portable Document Format", suffixes: "pdf", enabledPlugin: null },
+    const items = [
+      new MimeType({ type: 'application/pdf', description: 'Portable Document Format', suffixes: 'pdf', enabledPlugin: null }),
+      new MimeType({ type: 'text/pdf', description: 'Portable Document Format', suffixes: 'pdf', enabledPlugin: null }),
     ];
-    m.item = (i) => m[i] || null;
-    m.namedItem = (name) => m.find(x => x.type === name) || null;
-    return m;
+    return new MimeTypeArray(items);
   },
   userAgentData: {
     brands: [

@@ -1846,4 +1846,56 @@ mod tests {
             .unwrap();
         assert_eq!(html.as_str().unwrap().to_lowercase(), "<b>y</b>");
     }
+
+    #[test]
+    fn test_navigator_plugins_is_plugin_array() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("Object.prototype.toString.call(navigator.plugins)")
+                .unwrap(),
+            serde_json::json!("[object PluginArray]")
+        );
+        assert_eq!(
+            rt.evaluate("Object.prototype.toString.call(navigator.mimeTypes)")
+                .unwrap(),
+            serde_json::json!("[object MimeTypeArray]")
+        );
+        assert!(
+            rt.evaluate("navigator.plugins.length")
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                > 0.0
+        );
+        assert_eq!(
+            rt.evaluate("navigator.plugins[0] && typeof navigator.plugins[0].name")
+                .unwrap(),
+            serde_json::json!("string")
+        );
+    }
+
+    #[test]
+    fn test_plugin_instances_are_plugin_type() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("Object.prototype.toString.call(navigator.plugins[0])")
+                .unwrap(),
+            serde_json::json!("[object Plugin]")
+        );
+    }
+
+    #[test]
+    fn test_plugin_constructors_on_global_this() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let shape = rt
+            .evaluate(
+                r#"['Plugin','MimeType','PluginArray','MimeTypeArray']
+                     .map(n => typeof globalThis[n])"#,
+            )
+            .unwrap();
+        assert_eq!(
+            shape,
+            serde_json::json!(["function", "function", "function", "function"])
+        );
+    }
 }
