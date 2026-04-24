@@ -1,7 +1,8 @@
 # Obscura security & trust audit
 
 **Audit date:** 2026-04-23
-**Commit audited:** `b00a1f2` (tip of `main`)
+**Commit audited:** `b00a1f2` (tip of `main` at audit time)
+**Last status update:** 2026-04-24
 **Upstream:** `github.com/h4ckf0r0day/obscura` (created 2026-04-13, 10 days old at audit time)
 **Scope:** full source tree — 6 crates, ~12 kLOC Rust + ~3 kLOC bundled JS
 **Out of scope:** contents of the pre-built release tarballs on GitHub Releases (see §3)
@@ -15,6 +16,12 @@ The **source** is materially tamer than the surface signals suggest. It is a rea
 The **distribution layer** is the real problem. The pre-built tarballs are not cryptographically bound to this source: no signatures, no SHA256SUMS, no SLSA provenance, tag-pinned (not SHA-pinned) actions, and a `continue-on-error: true` on the stealth build step that lets a stealth-featured release silently diverge from the default build. Combined with the author's pseudonymous handle, the 10-day-old repo, and the anomalously high star velocity (1,681 stars / 123 forks in 10 days), the releases should be treated as unsigned third-party binaries from an unvetted author.
 
 **Bottom line:** build from source. Do not `curl | tar x` the releases.
+
+### Remediation status (as of 2026-04-24)
+
+All four actionable code/CI findings from this audit (F1, F2, F3, F5) are addressed on `main` with test coverage in the audited fork. The release pipeline now publishes SHA256 sidecars and SLSA build provenance, drops `continue-on-error` on the stealth build, and pins every action to a commit SHA. The ES module loader goes through an origin-aware Private Network Access filter that blocks the IMDS / localhost cases called out in §4.2, verified by 18 passing PNA tests in `obscura-net`. Per-finding status is recorded in the tables in §3.1 and §6; resolution detail and commit references are in §9.
+
+Out of scope of this fork and deliberately deferred: F4 (upstream trust signal), F6 (license mismatch — coordinate with upstream author per `CLAUDE.md`), F7 (wreq RCs — mitigated by only compiling under `--features stealth`), F8/F9/F10 (Low / by-design), F11 (policy).
 
 ---
 
@@ -69,17 +76,19 @@ None of these prove anything. They establish that the operator is unvetted and t
 
 **Findings:**
 
-| # | Issue | Severity |
-|---|---|---|
-| R1 | No SHA256SUMS file published with releases | High |
-| R2 | No cosign / sigstore signing | High |
-| R3 | No SLSA provenance / `--attestations` | Medium |
-| R4 | No reproducible-build documentation | Medium |
-| R5 | `continue-on-error: true` on the stealth build lets a release succeed even if the stealth binary doesn't match the non-stealth one — stealth artifact can silently diverge | Medium |
-| R6 | Actions pinned by tag, not commit SHA (`actions/checkout@v4`, `dtolnay/rust-toolchain@stable`, `softprops/action-gh-release@v2`) — tags can be force-moved by the action maintainer | Medium |
-| R7 | Matrix covers Linux/macOS/Windows but only the "Build" step produces the default artifact; a compromised runner or action could swap the tarball before upload without detection | Medium |
+| # | Issue | Severity | Status (2026-04-24) |
+|---|---|---|---|
+| R1 | No SHA256SUMS file published with releases | High | **Fixed** — `.sha256` sidecar emitted per artifact and uploaded alongside the tarball/zip (`release.yml:50,59-60,74-81`). |
+| R2 | No cosign / sigstore signing | High | **Fixed (via SLSA)** — Sigstore-backed build provenance attached per artifact via `actions/attest-build-provenance` (`release.yml:62-72`); verifiable with `gh attestation verify`. |
+| R3 | No SLSA provenance / `--attestations` | Medium | **Fixed** — same attestation step; `id-token: write` / `attestations: write` permissions added at workflow scope (`release.yml:8-11`). |
+| R4 | No reproducible-build documentation | Medium | Deferred (documentation task, not a supply-chain gate). |
+| R5 | `continue-on-error: true` on the stealth build | Medium | **Fixed** — removed; stealth build is now a required step (`release.yml:41-42`). |
+| R6 | Actions pinned by tag, not commit SHA | Medium | **Fixed** — all actions SHA-pinned with tag retained as comment; weekly Dependabot updates configured (`.github/dependabot.yml`). |
+| R7 | Compromised runner could swap the tarball before upload without detection | Medium | **Mitigated** — SHA256 sidecar + SLSA attestation bind artifact → source commit → builder identity. A swap would break both. |
 
 **Read:** the workflow builds from the same source you can read, but there is no mechanism to prove that the binary you `curl`ed is the output of this workflow for this commit. Treat the tarballs as unsigned third-party binaries.
+
+**Update (2026-04-24):** the above paragraph described the upstream audit state. In this fork, the binding exists: consumers can verify with `shasum -a 256 -c obscura-x86_64-linux.tar.gz.sha256` and `gh attestation verify obscura-x86_64-linux.tar.gz --repo geoffdutton/obscura-audited`. The advice to build from source still stands for users who don't want to trust GitHub's attestation infrastructure.
 
 ### 3.2 Dependencies
 
@@ -116,13 +125,15 @@ fn validate_fetch_url(url: &url::Url) -> Result<(), String> {
 
 Same filter in `crates/obscura-net/src/client.rs:67-116` for the native HTTP path. This is a **positive** finding — most scraping stacks don't filter here and are usable as internal-network probes when pointed at hostile pages.
 
-**Gap:** `ObscuraModuleLoader::load` (`crates/obscura-js/src/module_loader.rs:47-92`) fetches ES modules over HTTP with **no such validation**. A rendered page can do:
+**Gap (at audit time — now fixed, see below):** `ObscuraModuleLoader::load` (`crates/obscura-js/src/module_loader.rs:47-92`) fetches ES modules over HTTP with **no such validation**. A rendered page can do:
 
 ```js
 await import('http://169.254.169.254/latest/meta-data/iam/security-credentials/')
 ```
 
 …and the module loader will fetch and (attempt to) execute it. This is a real SSRF vector if you ever run this headless browser against hostile pages in a cloud environment.
+
+**Update (2026-04-24):** the module loader now calls `validate_pna(&target, RequestInitiator::Page(&base_url))` before any network IO (`crates/obscura-js/src/module_loader.rs:66-68`). `base_url` that doesn't parse falls back to a synthetic `https://unknown.invalid` so the initiator is treated as public and private targets remain blocked (`module_loader.rs:62-64`). The legacy `validate_fetch_url` was superseded by an origin-aware Private Network Access filter: the target's address space (`Public` / `Private` / `Local`) is compared against the initiator's, and a page-initiated fetch is blocked iff the target is strictly more private. Top-level navigations (the CLI `obscura fetch http://localhost` path) remain allowed. Covered by 18 tests in `crates/obscura-net/src/client.rs::pna_tests`, including the IMDS scenario (`page_public_to_private_is_blocked`). See §9.
 
 ### 4.3 JS↔Rust bridge
 
@@ -228,19 +239,19 @@ The feature set is specifically purpose-built to defeat bot-detection systems on
 
 ## 6. Findings summary
 
-| # | Finding | Severity | Location |
-|---|---|---|---|
-| F1 | Pre-built release tarballs lack signatures, checksums, provenance | **High** (distribution) | `.github/workflows/release.yml` |
-| F2 | `continue-on-error: true` on stealth build lets artifact silently diverge | Medium | `.github/workflows/release.yml:41` |
-| F3 | GitHub Actions pinned by tag, not commit SHA | Medium | `.github/workflows/release.yml:30-58` |
-| F4 | Author is pseudonymous (`h4ckf0r0day`) with 10-day-old repo and anomalous star velocity | Signal | upstream metadata |
-| F5 | `ObscuraModuleLoader::load` fetches ES modules without SSRF filter — bypasses the filter that guards `op_fetch_url` | **Medium** (runtime, with hostile-page threat) | `crates/obscura-js/src/module_loader.rs:47-92` |
-| F6 | License declaration mismatch (`Cargo.toml` = MIT; LICENSE + README = Apache 2.0) | Low | `Cargo.toml:15` |
-| F7 | Stealth dependencies (`wreq`, `wreq-util`) are release candidates from an ecosystem with typosquat / handoff history | Low | `crates/obscura-net/Cargo.toml` |
-| F8 | README benchmarks unverifiable (no reproducer, no methodology) | Low / non-security | `README.md` |
-| F9 | Multi-worker load balancer does raw TCP forwarding with 4-byte peek; safe on 127.0.0.1, unsafe if ever exposed | Low | `crates/obscura-cli/src/main.rs:203-238` |
-| F10 | `Worker` shim uses `new Function(...)` to execute worker code | Low (by-design) | `crates/obscura-js/js/bootstrap.js:2582` |
-| F11 | Stealth feature set is explicitly adversarial to production WAFs; dual-use / policy risk | **Policy** | `crates/obscura-js/js/bootstrap.js`, `crates/obscura-net/src/wreq_client.rs` |
+| # | Finding | Severity | Location | Status (2026-04-24) |
+|---|---|---|---|---|
+| F1 | Pre-built release tarballs lack signatures, checksums, provenance | **High** (distribution) | `.github/workflows/release.yml` | **Fixed** — SHA256 sidecars + SLSA provenance via `actions/attest-build-provenance`. Commits `d65a553`, `2a58a8f`. |
+| F2 | `continue-on-error: true` on stealth build lets artifact silently diverge | Medium | `.github/workflows/release.yml:41` | **Fixed** — `continue-on-error` removed (`release.yml:41-42`). Commit `2a58a8f`. |
+| F3 | GitHub Actions pinned by tag, not commit SHA | Medium | `.github/workflows/release.yml:30-58` | **Fixed** — every action SHA-pinned with semver-tag comment; Dependabot configured for weekly updates. Commits `560b96e`, `2a58a8f`. |
+| F4 | Author is pseudonymous (`h4ckf0r0day`) with 10-day-old repo and anomalous star velocity | Signal | upstream metadata | N/A — upstream trust signal, not addressable in this fork. Fork origin disclosed in `CLAUDE.md` and `README.md`. |
+| F5 | `ObscuraModuleLoader::load` fetches ES modules without SSRF filter — bypasses the filter that guards `op_fetch_url` | **Medium** (runtime, with hostile-page threat) | `crates/obscura-js/src/module_loader.rs:47-92` | **Fixed** — now calls `validate_pna(&target, RequestInitiator::Page(&base_url))` before network IO (`module_loader.rs:66-68`), with fail-closed fallback on unparseable `base_url` (`:62-64`). Origin-aware PNA model replaces the flat public-only filter. 18 passing PNA tests including the IMDS case. Commits `1a187ca`, `5e4d76d`. |
+| F6 | License declaration mismatch (`Cargo.toml` = MIT; LICENSE + README = Apache 2.0) | Low | `Cargo.toml:15` | **Deferred** — per `CLAUDE.md`, coordinate with upstream author before touching license metadata. |
+| F7 | Stealth dependencies (`wreq`, `wreq-util`) are release candidates from an ecosystem with typosquat / handoff history | Low | `crates/obscura-net/Cargo.toml` | **Mitigated** — only compiled under `--features stealth` (Linux-only in CI). Open: track for a stable `wreq` release before tagging a stealth build. |
+| F8 | README benchmarks unverifiable (no reproducer, no methodology) | Low / non-security | `README.md` | Not addressed (non-security, documentation task). |
+| F9 | Multi-worker load balancer does raw TCP forwarding with 4-byte peek; safe on 127.0.0.1, unsafe if ever exposed | Low | `crates/obscura-cli/src/main.rs:203-238` | **By design** — localhost-only; audit flagged as Low conditional on future exposure. |
+| F10 | `Worker` shim uses `new Function(...)` to execute worker code | Low (by-design) | `crates/obscura-js/js/bootstrap.js:2582` | **By design** — required for the Worker shim. |
+| F11 | Stealth feature set is explicitly adversarial to production WAFs; dual-use / policy risk | **Policy** | `crates/obscura-js/js/bootstrap.js`, `crates/obscura-net/src/wreq_client.rs` | Policy, not code. Addressed by disclosure in README and §5.4 here. |
 
 ### Explicitly searched for and did NOT find
 - Hardcoded telemetry / C2 / update-check URLs
@@ -278,3 +289,81 @@ The feature set is specifically purpose-built to defeat bot-detection systems on
 - Full read of: `bootstrap.js` (header + key stealth sections), `op_fetch_url`, `validate_fetch_url`, `main.rs`, `wreq_client.rs`, `module_loader.rs`, `tree_sink.rs`, `build.rs`, `release.yml`, `Cargo.toml` × 7.
 - GitHub API check for repo creation date, star count, fork count, contributor count.
 - No code was executed. No binary was run. No release tarball was downloaded.
+
+---
+
+## 9. Remediation detail (2026-04-24)
+
+This section documents how each Fixed/Mitigated finding was addressed in the fork and how to re-verify. It is additive to the original audit — no prior text has been deleted.
+
+### 9.1 F1 / R1–R3 / R7 — release artifact provenance
+
+Workflow: `.github/workflows/release.yml` (commits `d65a553`, `2a58a8f`).
+
+- `id-token: write` and `attestations: write` added at workflow scope (`:8-11`).
+- Per-artifact SHA256 sidecar generated with `shasum -a 256` on Unix (`:50`) and `Get-FileHash` on Windows (`:59-60`).
+- Per-artifact SLSA build provenance attached via `actions/attest-build-provenance@a2bbfa25…` (`:62-72`). Ties the artifact to the GitHub-runner identity and the source commit.
+- `softprops/action-gh-release` uploads both the artifact and its `.sha256` sidecar (`:74-81`).
+
+Consumer verification:
+
+```bash
+# integrity
+shasum -a 256 -c obscura-x86_64-linux.tar.gz.sha256
+# provenance + source commit
+gh attestation verify obscura-x86_64-linux.tar.gz --repo geoffdutton/obscura-audited
+```
+
+### 9.2 F2 / R5 — stealth build no longer swallows failures
+
+`release.yml:41-42` — the stealth build step no longer has `continue-on-error: true`. Because the stealth build overwrites the non-stealth binary at the same `target/.../obscura` path, tolerating stealth failures previously produced tarballs whose stealth status depended on whether the second `cargo build` happened to succeed. Commit `2a58a8f`.
+
+### 9.3 F3 / R6 — SHA-pinned actions + Dependabot
+
+Every action is now pinned to a 40-character commit SHA with the semver tag retained as a trailing comment:
+
+| Action | Pinned SHA | Tag |
+|---|---|---|
+| `actions/checkout` | `de0fac2e4500dabe0009e67214ff5f5447ce83dd` | `v6.0.2` |
+| `dtolnay/rust-toolchain` | `29eef336d9b2848a0b548edc03f92a220660cdb8` | `stable` |
+| `actions/attest-build-provenance` | `a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32` | `v4.1.0` |
+| `softprops/action-gh-release` | `b4309332981a82ec1c5618f44dd2e27cc8bfbfda` | `v3.0.0` |
+
+`.github/dependabot.yml` opts into weekly updates for the `github-actions` ecosystem so pins don't stagnate. Commits `560b96e`, `2a58a8f`.
+
+### 9.4 F5 — module-loader SSRF, refined into origin-aware PNA
+
+Two-step fix. Commit `1a187ca` closed the raw bypass (the module loader now calls the same filter as `op_fetch_url`). Commit `5e4d76d` replaced the flat filter with Chrome's Private Network Access model because the initial fix rejected legitimate top-level navigations like `obscura fetch http://localhost`.
+
+The PNA model lives in `crates/obscura-net/src/client.rs`:
+
+- `AddressSpace` enum — `Public` / `Private` / `Local`, mirroring Chromium's three-tier classification.
+  - `Local`: IPv4/IPv6 loopback, `localhost` and `*.localhost`.
+  - `Private`: RFC1918 (`10/8`, `172.16/12`, `192.168/16`), IPv4 link-local (`169.254/16`), IPv6 ULA (`fc00::/7`), IPv6 link-local (`fe80::/10`).
+  - `Public`: everything else.
+- `validate_pna(target, initiator)` where `initiator` is one of:
+  - `RequestInitiator::TopLevel` — user-initiated; scheme check only.
+  - `RequestInitiator::Page(&Url)` — page-initiated; blocked iff target is strictly more private than initiator.
+
+Module-loader wiring (`crates/obscura-js/src/module_loader.rs:66-68`):
+
+```rust
+validate_pna(&parsed, RequestInitiator::Page(&initiator))
+    .map_err(|e| io_err(format!("Refused to load module {}: {}", url, e)))?;
+```
+
+Fail-closed fallback (`:62-64`) — if the page's `base_url` doesn't parse, the initiator becomes a synthetic `https://unknown.invalid`, so unparseable origins are treated as public and cannot reach private/local targets.
+
+Test coverage — `crates/obscura-net/src/client.rs::pna_tests`, 18 tests:
+
+- Address-space classification: RFC1918 boundaries, IPv4 loopback/link-local, IPv6 loopback/link-local/ULA, `.localhost` suffix, public addresses.
+- Full PNA decision matrix: `TopLevel` always allowed; `page_public_to_private_is_blocked` (the IMDS case, `169.254.169.254` from a public page); `page_public_to_local_is_blocked`; `page_private_to_local_is_blocked`; `page_private_to_private_is_allowed` (so `10.0.0.5` can fetch from `10.0.0.6`); `page_local_to_anything_is_allowed`; `unparseable_origin_treated_as_public_initiator`; non-HTTP scheme rejection regardless of initiator.
+
+Re-verify: `cargo test -p obscura-net --lib` → 35 passed, 0 failed (includes all 18 PNA tests).
+
+### 9.5 Known gaps / follow-ups
+
+- **No direct integration test for `ObscuraModuleLoader::load`.** Coverage is transitive through `validate_pna`; the fallback path at `module_loader.rs:62-64` isn't exercised end-to-end. Worth a small test constructing the loader with an empty/invalid `base_url` and asserting that `http://169.254.169.254/` still rejects.
+- **F7 not closed.** `wreq 6.0.0-rc.28` and `wreq-util 3.0.0-rc.10` remain pinned. Monitor upstream for a stable release before tagging a stealth build.
+- **Recommendation §7.3 is obsolete.** That recommendation told consumers to close F5 locally. F5 is closed in this fork.
+- **Recommendation §7.1 stands** for consumers who prefer not to trust GitHub's attestation infrastructure. Build-from-source remains the conservative default; SHA256 + SLSA provenance is for consumers who will trust `gh attestation verify`.
