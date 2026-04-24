@@ -31,30 +31,6 @@ Designed for automation at scale, not desktop browsing.
 
 ## Install
 
-### Download
-
-Grab the latest binary from [Releases](https://github.com/h4ckf0r0day/obscura/releases):
-
-```bash
-# Linux x86_64
-curl -LO https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-x86_64-linux.tar.gz
-tar xzf obscura-x86_64-linux.tar.gz
-./obscura fetch https://example.com --eval "document.title"
-
-# macOS Apple Silicon
-curl -LO https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-aarch64-macos.tar.gz
-tar xzf obscura-aarch64-macos.tar.gz
-
-# macOS Intel
-curl -LO https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-x86_64-macos.tar.gz
-tar xzf obscura-x86_64-macos.tar.gz
-
-# Windows
-Download the `.zip` from the releases page and extract it manually.
-```
-
-Single binary. No Chrome, no Node.js, no dependencies.
-
 ### Build from source
 
 ```bash
