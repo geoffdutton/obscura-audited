@@ -1712,4 +1712,76 @@ mod tests {
             .unwrap();
         assert_eq!(ok, serde_json::json!(true));
     }
+
+    #[test]
+    fn test_function_tostring_has_no_prototype() {
+        // Native functions have no `prototype` own property; creepjs uses this as a probe.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let has_proto = rt
+            .evaluate("'prototype' in Function.prototype.toString")
+            .unwrap();
+        assert_eq!(has_proto, serde_json::json!(false));
+    }
+
+    #[test]
+    fn test_function_tostring_ownkeys_shape() {
+        // Native functions expose exactly ['length','name'] as own keys.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let keys = rt
+            .evaluate("Reflect.ownKeys(Function.prototype.toString).sort()")
+            .unwrap();
+        assert_eq!(keys, serde_json::json!(["length", "name"]));
+    }
+
+    #[test]
+    fn test_function_tostring_name_descriptor() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let desc = rt
+            .evaluate(
+                r#"(function() {
+                    const d = Object.getOwnPropertyDescriptor(Function.prototype.toString, 'name');
+                    return { value: d.value, writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            desc,
+            serde_json::json!({
+                "value": "toString", "writable": false, "enumerable": false, "configurable": true
+            })
+        );
+    }
+
+    #[test]
+    fn test_function_tostring_length_is_zero() {
+        // Native Function.prototype.toString has length 0 — V8 surfaces JS numbers as
+        // f64, so compare via as_f64() rather than serde integer equality.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let len = rt.evaluate("Function.prototype.toString.length").unwrap();
+        assert_eq!(len.as_f64().unwrap(), 0.0);
+    }
+
+    #[test]
+    fn test_class_extends_function_tostring_throws() {
+        // Real Chrome throws TypeError when you try to `class Foo extends <native fn>`.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let threw = rt
+            .evaluate(
+                r#"(function() {
+                    try { eval('class Foo extends Function.prototype.toString {}'); return false; }
+                    catch(e) { return e instanceof TypeError; }
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(threw, serde_json::json!(true));
+    }
+
+    #[test]
+    fn test_function_tostring_self_describes_native() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let s = rt
+            .evaluate("Function.prototype.toString.toString()")
+            .unwrap();
+        assert_eq!(s.as_str().unwrap(), "function toString() { [native code] }");
+    }
 }

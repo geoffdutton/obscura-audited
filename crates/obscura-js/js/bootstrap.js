@@ -47,16 +47,33 @@ const _Deno = Deno;
 
 const _dom = (cmd, a1, a2) => _Deno.core.ops.op_dom(cmd, String(a1 ?? ""), String(a2 ?? ""));
 
-const _nativeFns = new Set();
+// Use a WeakSet so marked functions can still be GC'd.
+const _nativeFns = new WeakSet();
 const _origToString = Function.prototype.toString;
-Function.prototype.toString = function() {
-  if (_nativeFns.has(this)) {
-    return `function ${this.name || ''}() { [native code] }`;
-  }
-  return _origToString.call(this);
-};
+
+// Proxy around the native toString so all reflective probes (ownKeys,
+// getOwnPropertyDescriptor, 'prototype' in …, class extension) forward to the
+// real builtin. Only the `apply` trap lies, swapping in a `[native code]`
+// stringification for functions we've marked as shims.
+const _toStringProxy = new Proxy(_origToString, {
+  apply(target, thisArg, args) {
+    if (_nativeFns.has(thisArg)) {
+      return `function ${thisArg.name || ''}() { [native code] }`;
+    }
+    return Reflect.apply(target, thisArg, args);
+  },
+});
+
+Object.defineProperty(Function.prototype, 'toString', {
+  value: _toStringProxy,
+  writable: true,
+  enumerable: false,
+  configurable: true,
+});
+
 const _markNative = function(fn) { if (typeof fn === 'function') _nativeFns.add(fn); return fn; };
-_nativeFns.add(Function.prototype.toString);
+_nativeFns.add(_toStringProxy);
+_nativeFns.add(_origToString);
 
 [Error, TypeError, ReferenceError, SyntaxError, RangeError, URIError, EvalError].forEach(E => {
   try {
