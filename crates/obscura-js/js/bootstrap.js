@@ -939,7 +939,7 @@ class DocumentType extends Node {
 }
 
 const _cache = new Map();
-function _wrap(nid) {
+const _wrap = function(nid) {
   if (nid < 0 || nid === null || nid === undefined || isNaN(nid)) return null;
   if (_cache.has(nid)) return _cache.get(nid);
   const t = +_dom("node_type", nid);
@@ -949,21 +949,21 @@ function _wrap(nid) {
   else n = new Node(nid);
   _cache.set(nid, n);
   return n;
-}
-function _wrapEl(nid) {
+};
+const _wrapEl = function(nid) {
   if (nid < 0 || nid === null || nid === undefined || isNaN(nid)) return null;
   if (_cache.has(nid)) return _cache.get(nid);
   const n = new Element(nid);
   _cache.set(nid, n);
   return n;
-}
+};
 
 globalThis.document = null;
-function _resolveUrl(url) {
+const _resolveUrl = function(url) {
   if (!url) return url;
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('about:')) return url;
   try { return new URL(url, _domParse("document_url") || "about:blank").href; } catch(e) { return url; }
-}
+};
 globalThis.location = {
   get href() { return _domParse("document_url") ?? "about:blank"; },
   set href(url) { _Deno.core.ops.op_navigate(_resolveUrl(url), 'GET', ''); },
@@ -997,7 +997,7 @@ globalThis.frameElement = null;
 globalThis.length = 0;
 
 const _iframeRegistry = [];
-function _registerIframe(iframeEl) {
+const _registerIframe = function(iframeEl) {
   const idx = _iframeRegistry.length;
   _iframeRegistry.push(iframeEl);
   globalThis.length = _iframeRegistry.length;
@@ -1006,7 +1006,7 @@ function _registerIframe(iframeEl) {
     configurable: true,
     enumerable: false,
   });
-}
+};
 globalThis.navigator = {
   get userAgent() { return globalThis.__obscura_ua || "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"; },
   get appVersion() { return this.userAgent.replace('Mozilla/', ''); },
@@ -2125,14 +2125,14 @@ class TextMetrics {
 }
 globalThis.TextMetrics = TextMetrics;
 
-function _fontSizePx(font) {
+const _fontSizePx = function(font) {
   const fm = /(\d+(?:\.\d+)?)(px|pt|em|rem)/.exec(font || '');
   if (!fm) return 10;
   const n = parseFloat(fm[1]);
   return fm[2] === 'pt' ? n * 4 / 3 : (fm[2] === 'em' || fm[2] === 'rem') ? n * 16 : n;
-}
+};
 
-function _charAdvance(code, fontSize) {
+const _charAdvance = function(code, fontSize) {
   let base;
   if (code === 32) base = 0.2783203125;
   else if (code === 46 || code === 44 || code === 39) base = 0.25;
@@ -2144,7 +2144,7 @@ function _charAdvance(code, fontSize) {
   else base = 0.55 + _fpRand(code) * 0.3;
   const jitter = (_fpRand(code * 31 + ((fontSize * 100) | 0)) - 0.5) * 0.008;
   return (base + jitter) * fontSize;
-}
+};
 
 class _Canvas2D {
   constructor(canvas) {
