@@ -830,6 +830,57 @@ mod tests {
         rt
     }
 
+    /// Creates a runtime without calling init() — used to check the pre-init
+    /// state of the V8 context (e.g. whether Deno is still on globalThis).
+    fn new_without_init() -> ObscuraJsRuntime {
+        let state = std::rc::Rc::new(std::cell::RefCell::new(crate::ops::ObscuraState::new()));
+        let state_clone = state.clone();
+        let module_loader = std::rc::Rc::new(crate::module_loader::ObscuraModuleLoader::new("about:blank"));
+        let mut runtime = deno_core::JsRuntime::new(deno_core::RuntimeOptions {
+            extensions: vec![crate::ops::build_extension()],
+            module_loader: Some(module_loader),
+            startup_snapshot: Some(SNAPSHOT),
+            ..Default::default()
+        });
+        runtime.op_state().borrow_mut().put(state_clone);
+        ObscuraJsRuntime { runtime, state, object_store: std::collections::HashMap::new(), object_counter: 0 }
+    }
+
+    // --- Rule 1: globals leak (Red tests) ---
+
+    #[test]
+    fn test_no_webdriver_in_navigator() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let v = rt.evaluate("'webdriver' in navigator").unwrap();
+        assert_eq!(v, serde_json::json!(false), "navigator.webdriver must not exist");
+    }
+
+    #[test]
+    fn test_no_deno_global_after_init() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let v = rt.evaluate("typeof Deno").unwrap();
+        assert_eq!(v, serde_json::json!("undefined"), "Deno must be gone after init");
+    }
+
+    #[test]
+    fn test_deno_not_visible_before_init() {
+        // Catches the pre-init window: bootstrap must delete Deno from globalThis
+        // before init() is ever called, so that a context restored from snapshot
+        // never exposes Deno to page scripts.
+        let mut rt = new_without_init();
+        let v = rt.evaluate("typeof Deno").unwrap();
+        assert_eq!(v, serde_json::json!("undefined"), "Deno must not be visible before init()");
+    }
+
+    #[test]
+    fn test_no_bootstrap_globals_leak() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let v = rt.evaluate(
+            "Object.getOwnPropertyNames(window).filter(k => /^_fp|^_mark|^_wrap|^_resolveUrl|^_registerIframe|obscura/i.test(k)).length"
+        ).unwrap();
+        assert_eq!(v, serde_json::json!(0), "bootstrap internals must not appear on window");
+    }
+
     #[test]
     fn test_document_title() {
         let mut rt = setup_runtime("<html><head><title>Test</title></head><body></body></html>");

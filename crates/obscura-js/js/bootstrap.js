@@ -1,4 +1,5 @@
 "use strict";
+(function() {
 
 // Per-page state — lexical, not on globalThis. Invisible to page-script probes
 // (Object.keys/getOwnPropertyNames/in) because these names live only in bootstrap's
@@ -42,8 +43,10 @@ globalThis.dispatchEvent = function(event) {
   return !event.defaultPrevented;
 };
 
-// Capture the Deno runtime reference before we delete it from globalThis.
-const _Deno = Deno;
+// Capture and immediately remove Deno from globalThis — closes the pre-init window
+// where page scripts could detect the Deno runtime.
+const _Deno = globalThis.Deno;
+delete globalThis.Deno;
 
 const _dom = (cmd, a1, a2) => _Deno.core.ops.op_dom(cmd, String(a1 ?? ""), String(a2 ?? ""));
 
@@ -3330,20 +3333,8 @@ globalThis[_KEY].init = function() {
   globalThis.performance.timeOrigin = t0;
   globalThis.performance.timing = { navigationStart: t0, domContentLoadedEventEnd: t0, loadEventEnd: t0 };
 
-  const hide = (obj, props) => {
-    for (const p of props) {
-      if (p in obj) {
-        try { Object.defineProperty(obj, p, { enumerable: false, configurable: true }); } catch(e) {}
-      }
-    }
-  };
-  const toHide = Object.keys(globalThis).filter(k =>
-    k.startsWith('_') || k.includes('obscura') || k.includes('Obscura')
-  );
-  for (const p of toHide) {
-    try { Object.defineProperty(globalThis, p, { enumerable: false }); } catch(e) {
-    }
-  }
   delete globalThis.Deno;
   delete globalThis[_KEY].init;
 };
+
+})();
