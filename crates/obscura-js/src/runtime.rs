@@ -1784,4 +1784,66 @@ mod tests {
             .unwrap();
         assert_eq!(s.as_str().unwrap(), "function toString() { [native code] }");
     }
+
+    #[test]
+    fn test_element_prototype_innerhtml_descriptor() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let shape = rt
+            .evaluate(
+                r#"(function() {
+                    const d = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+                    return d ? { hasGet: typeof d.get === 'function',
+                                 hasSet: typeof d.set === 'function',
+                                 enumerable: d.enumerable,
+                                 configurable: d.configurable } : null;
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            shape,
+            serde_json::json!({
+                "hasGet": true, "hasSet": true, "enumerable": true, "configurable": true
+            }),
+            "Element.prototype.innerHTML must be a configurable/enumerable accessor"
+        );
+    }
+
+    #[test]
+    fn test_element_prototype_has_core_accessors() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let missing = rt
+            .evaluate(
+                r#"['innerHTML','outerHTML','innerText','textContent','className','id',
+                    'tagName','style','children','childElementCount',
+                    'clientWidth','clientHeight','offsetWidth','offsetHeight','dataset']
+                     .filter(p => !Object.getOwnPropertyDescriptor(Element.prototype, p))"#,
+            )
+            .unwrap();
+        assert_eq!(missing, serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_element_accessors_still_functional() {
+        // Descriptor moves must not break actual DOM behavior.
+        let mut rt = setup_runtime(r#"<html><body><div id="x" class="a">hi</div></body></html>"#);
+        assert_eq!(
+            rt.evaluate("document.getElementById('x').id").unwrap(),
+            serde_json::json!("x")
+        );
+        assert_eq!(
+            rt.evaluate("document.getElementById('x').className")
+                .unwrap(),
+            serde_json::json!("a")
+        );
+        assert_eq!(
+            rt.evaluate("document.getElementById('x').tagName").unwrap(),
+            serde_json::json!("DIV")
+        );
+        rt.evaluate("document.getElementById('x').innerHTML = '<b>y</b>'")
+            .unwrap();
+        let html = rt
+            .evaluate("document.getElementById('x').innerHTML")
+            .unwrap();
+        assert_eq!(html.as_str().unwrap().to_lowercase(), "<b>y</b>");
+    }
 }

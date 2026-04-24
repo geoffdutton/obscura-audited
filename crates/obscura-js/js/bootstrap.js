@@ -735,6 +735,26 @@ class Element extends Node {
   prepend() {}
 }
 
+// CreepJS probes Object.getOwnPropertyDescriptor(Element.prototype, X) for every
+// common DOM accessor. ES class-body getters land on the prototype with
+// enumerable:false, but real browsers make these enumerable accessors, and
+// inherited accessors like textContent (declared on Node) only show via
+// getOwnPropertyDescriptor on the class that owns them. Re-publish the 15 names
+// as own accessor descriptors on Element.prototype with the browser shape.
+for (const _name of [
+  'innerHTML','outerHTML','innerText','textContent','className','id',
+  'tagName','style','children','childElementCount',
+  'clientWidth','clientHeight','offsetWidth','offsetHeight','dataset',
+]) {
+  const _d = Object.getOwnPropertyDescriptor(Element.prototype, _name)
+          ?? Object.getOwnPropertyDescriptor(Node.prototype, _name);
+  if (_d && (_d.get || _d.set)) {
+    Object.defineProperty(Element.prototype, _name, {
+      get: _d.get, set: _d.set, enumerable: true, configurable: true,
+    });
+  }
+}
+
 class Document extends Node {
   get documentElement() { return _wrapEl(+_dom("document_element")); }
   get head() { return this.querySelector("head"); }
