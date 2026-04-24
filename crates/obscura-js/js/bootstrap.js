@@ -716,7 +716,31 @@ class Element extends Node {
     _state.clickTarget = this;
     return {x:8,y:8,width:100,height:20,top:8,right:108,bottom:28,left:8,toJSON(){return this;}};
   }
-  getClientRects() { return [this.getBoundingClientRect()]; }
+  getClientRects() {
+    // Real browsers return one rect per wrapped line. CreepJS probes a narrow
+    // container stuffed with repeated text and expects ≥4. Estimate lines from
+    // parent width and text length — crude but sufficient for the probe shape.
+    const base = this.getBoundingClientRect();
+    const parentW = this.parentNode?.clientWidth || 800;
+    const approxCharW = 7;
+    const text = this.textContent || '';
+    if (!text || parentW <= 0) return [base];
+    const charsPerLine = Math.max(1, Math.floor(parentW / approxCharW));
+    const lines = Math.max(1, Math.ceil(text.length / charsPerLine));
+    if (lines === 1) return [base];
+    const lineH = Math.max(1, Math.round(base.height / lines));
+    const rects = [];
+    for (let i = 0; i < lines; i++) {
+      rects.push({
+        x: base.x, y: base.y + i * lineH,
+        left: base.left, top: base.top + i * lineH,
+        right: base.right, bottom: base.top + (i + 1) * lineH,
+        width: base.width, height: lineH,
+        toJSON() { return this; },
+      });
+    }
+    return rects;
+  }
   scrollIntoView() { _state.clickTarget = this; }
   animate(keyframes, options) {
     const duration = typeof options === 'number' ? options : (options?.duration || 0);

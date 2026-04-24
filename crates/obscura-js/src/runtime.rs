@@ -2220,4 +2220,22 @@ mod tests {
             assert!(obj.contains_key(*key), "missing attribute: {}", key);
         }
     }
+
+    #[test]
+    fn test_get_client_rects_for_wrapped_text_returns_multiple() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let count = rt
+            .evaluate(
+                r#"(function() {
+                    const d = document.createElement('div');
+                    d.style.width = '50px';
+                    d.innerHTML = '<span>' + ('word ').repeat(20) + '</span>';
+                    document.body.appendChild(d);
+                    return d.querySelector('span').getClientRects().length;
+                })()"#,
+            )
+            .unwrap();
+        let n = count.as_f64().unwrap() as i32;
+        assert!(n >= 2, "expected ≥2 client rects, got {}", n);
+    }
 }
