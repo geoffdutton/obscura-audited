@@ -62,11 +62,25 @@ git clone https://github.com/h4ckf0r0day/obscura.git
 cd obscura
 cargo build --release
 
-# With stealth mode (anti-detection + tracker blocking)
+# With stealth mode (anti-detection + tracker blocking) — Linux only
 cargo build --release --features stealth
 ```
 
 Requires Rust 1.75+ ([rustup.rs](https://rustup.rs)). First build takes ~5 min (V8 compiles from source, cached after).
+
+#### Stealth build on macOS / Windows
+
+`--features stealth` depends on `wreq` → `boring-sys2`, whose symbol-prefixing is broken on macOS/Windows. Use a Linux container:
+
+```bash
+docker run --rm \
+  -v "$PWD":/src -w /src \
+  -v obscura-cargo-registry:/usr/local/cargo/registry \
+  -v obscura-linux-target:/src/target \
+  rust:1.95 cargo build --release --features stealth
+```
+
+The same wrapper runs the bot-detection check (`scripts/verify-stealth.sh`). The named volumes cache the cargo registry and the Linux target dir across runs.
 
 ## Quick Start
 

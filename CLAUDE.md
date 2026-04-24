@@ -37,15 +37,44 @@ Cargo workspace, 6 crates under `crates/`:
 
 ```bash
 cargo build --release                       # default build
-cargo build --release --features stealth    # + anti-detection + tracker blocking
+cargo build --release --features stealth    # + anti-detection + tracker blocking — LINUX ONLY (see Docker below)
 cargo test                                  # unit tests live inline in src/
 cargo test -p obscura-net                   # single crate — much faster once V8 is cached
 cargo fmt --all && cargo clippy --all-targets --all-features -- -D warnings  # pre-PR
-./scripts/verify-stealth.sh                 # sannysoft + creepjs bot-detection check
+./scripts/verify-stealth.sh                 # sannysoft + creepjs bot-detection check (Linux-only; see Docker below)
 ```
 
 - **First build ~5 min** — V8 compiles from source via `deno_core`. Cached after.
 - Requires Rust 1.75+ (edition 2021).
+
+### Stealth builds on macOS/Windows (Docker)
+
+`--features stealth` pulls in `wreq` → `boring-sys2`, whose `prefix-symbols`
+feature is broken on macOS/Windows: the C-side BoringSSL rename is skipped
+but the Rust bindgen rename is applied, so every TLS symbol is unresolved
+at link time. Run the stealth build and `verify-stealth.sh` in a Linux
+container instead:
+
+```bash
+# One-shot stealth build
+docker run --rm \
+  -v "$PWD":/src -w /src \
+  -v obscura-cargo-registry:/usr/local/cargo/registry \
+  -v obscura-linux-target:/src/target \
+  rust:1.95 cargo build --release --features stealth
+
+# Bot-detection verification (same image)
+docker run --rm \
+  -v "$PWD":/src -w /src \
+  -v obscura-cargo-registry:/usr/local/cargo/registry \
+  -v obscura-linux-target:/src/target \
+  rust:1.95 bash scripts/verify-stealth.sh
+```
+
+The named volumes (`obscura-cargo-registry`, `obscura-linux-target`) persist
+cargo's registry and the Linux target dir across runs — first run is ~5 min
+(V8 from source), subsequent runs are fast. The Linux target volume is
+isolated from your host `./target` (macOS build artifacts).
 
 ## Stealth feature: how it propagates
 

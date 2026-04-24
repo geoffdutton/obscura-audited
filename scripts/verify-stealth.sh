@@ -18,6 +18,9 @@ BUILD=true
 JSON_MODE=false
 TIMEOUT=45
 
+# Preserve original args so the Docker hint below can echo them back verbatim.
+ORIG_ARGS=("$@")
+
 # ── arg parse ─────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -27,6 +30,31 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
+
+# ── platform guard ────────────────────────────────────────────────────────────
+# `--features stealth` pulls in wreq → boring-sys2, whose `prefix-symbols`
+# feature is broken on macOS/Windows (C-side rename is skipped but the Rust
+# bindgen rename is applied, producing unresolved linker symbols). Run via
+# Docker on non-Linux hosts — the Linux-ELF binary also can't execute on
+# macOS, so the whole script must run inside the container.
+if [[ "$(uname -s)" != "Linux" ]]; then
+  cat >&2 <<EOF
+verify-stealth.sh requires Linux (boring-sys2 prefix-symbols is macOS/Windows-broken).
+
+Run via Docker:
+
+  docker run --rm \\
+    -v "\$PWD":/src -w /src \\
+    -v obscura-cargo-registry:/usr/local/cargo/registry \\
+    -v obscura-linux-target:/src/target \\
+    rust:1.95 bash scripts/verify-stealth.sh ${ORIG_ARGS[*]:-}
+
+The named volumes cache cargo's registry and the Linux target dir across
+runs (the Linux target stays isolated from your macOS ./target). First run
+is ~5 min (V8 compiles from source); subsequent runs are fast.
+EOF
+  exit 1
+fi
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 PASS=0; WARN=0; FAIL=0
@@ -52,8 +80,8 @@ log()     { echo "  $1" >&2; }
 
 # ── build ─────────────────────────────────────────────────────────────────────
 if $BUILD; then
-  echo "Building obscura (release)…" >&2
-  cargo build --release --quiet 2>&1 | tail -5 >&2
+  echo "Building obscura (release, --features stealth)…" >&2
+  cargo build --release --features stealth --quiet 2>&1 | tail -5 >&2
 fi
 
 if [[ ! -x "$BINARY" ]]; then
