@@ -925,24 +925,31 @@ mod tests {
     #[test]
     fn test_canvas_measure_text_float_width() {
         let mut rt = setup_runtime("<html><body></body></html>");
-        let width = rt.evaluate(
-            r#"(() => {
+        let width = rt
+            .evaluate(
+                r#"(() => {
                 const c = document.createElement('canvas');
                 const ctx = c.getContext('2d');
                 ctx.font = '16px sans-serif';
                 return ctx.measureText('Wj.').width;
-            })()"#
-        ).unwrap();
+            })()"#,
+            )
+            .unwrap();
         let w = width.as_f64().expect("width should be a number");
         assert!(w > 0.0, "width should be positive, got {}", w);
-        assert!(w.fract() != 0.0, "width should have sub-pixel precision, got {}", w);
+        assert!(
+            w.fract() != 0.0,
+            "width should have sub-pixel precision, got {}",
+            w
+        );
     }
 
     #[test]
     fn test_canvas_measure_text_full_metrics() {
         let mut rt = setup_runtime("<html><body></body></html>");
-        let keys = rt.evaluate(
-            r#"(() => {
+        let keys = rt
+            .evaluate(
+                r#"(() => {
                 const c = document.createElement('canvas');
                 const ctx = c.getContext('2d');
                 ctx.font = '16px sans-serif';
@@ -954,23 +961,31 @@ mod tests {
                     'emHeightAscent','emHeightDescent',
                     'hangingBaseline','alphabeticBaseline','ideographicBaseline'
                 ].filter(k => typeof m[k] === 'number');
-            })()"#
-        ).unwrap();
+            })()"#,
+            )
+            .unwrap();
         let arr = keys.as_array().expect("should return array");
-        assert_eq!(arr.len(), 12, "TextMetrics should expose all 12 numeric properties, got {:?}", arr);
+        assert_eq!(
+            arr.len(),
+            12,
+            "TextMetrics should expose all 12 numeric properties, got {:?}",
+            arr
+        );
     }
 
     #[test]
     fn test_canvas_measure_text_is_textmetrics_instance() {
         let mut rt = setup_runtime("<html><body></body></html>");
-        let result = rt.evaluate(
-            r#"(() => {
+        let result = rt
+            .evaluate(
+                r#"(() => {
                 const c = document.createElement('canvas');
                 const ctx = c.getContext('2d');
                 const m = ctx.measureText('x');
                 return m instanceof TextMetrics && typeof TextMetrics === 'function';
-            })()"#
-        ).unwrap();
+            })()"#,
+            )
+            .unwrap();
         assert_eq!(result, serde_json::json!(true));
     }
 
