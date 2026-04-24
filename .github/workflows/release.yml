@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -46,17 +48,35 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar czf ../../../${{ matrix.name }}.tar.gz obscura
           cd ../../..
+          shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           cd target/${{ matrix.target }}/release
           7z a ../../../${{ matrix.name }}.zip obscura.exe
           cd ../../..
+          $hash = (Get-FileHash -Algorithm SHA256 "${{ matrix.name }}.zip").Hash.ToLower()
+          "$hash  ${{ matrix.name }}.zip" | Out-File -FilePath "${{ matrix.name }}.zip.sha256" -Encoding ascii
+
+      - name: Attest build provenance (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/attest-build-provenance@520d128f165991a6c774bcb264f323e3d70747f4 # v2.2.0
+        with:
+          subject-path: ${{ matrix.name }}.tar.gz
+
+      - name: Attest build provenance (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/attest-build-provenance@520d128f165991a6c774bcb264f323e3d70747f4 # v2.2.0
+        with:
+          subject-path: ${{ matrix.name }}.zip
 
       - name: Upload
         uses: softprops/action-gh-release@aec2ec56f94eb8180ceec724245f64ef008b89f5 # v2.4.0
         with:
           files: |
             ${{ matrix.name }}.tar.gz
+            ${{ matrix.name }}.tar.gz.sha256
             ${{ matrix.name }}.zip
+            ${{ matrix.name }}.zip.sha256
