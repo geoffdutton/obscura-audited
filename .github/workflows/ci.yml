@@ -93,3 +93,7 @@ jobs:
       - name: Build stealth
         if: runner.os == 'Linux'
         run: cargo build --target ${{ matrix.target }} --features stealth
+
+      - name: TLS fingerprint snapshot
+        if: runner.os == 'Linux'
+        run: cargo test -p obscura-net --features stealth --test tls_fingerprint
