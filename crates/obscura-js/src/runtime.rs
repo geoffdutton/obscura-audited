@@ -2050,20 +2050,18 @@ mod tests {
 
     #[test]
     fn test_get_timezone_offset_matches_pinned_tz() {
-        // If resolvedOptions().timeZone says America/New_York, real Chrome's
-        // getTimezoneOffset returns 300 (EST) or 240 (EDT). We pin to one value
-        // for consistency — creepjs checks timezone coherence.
+        // Pinned to 300 (EST) in bootstrap.js so it stays consistent with the
+        // pinned Intl timezone (America/New_York) regardless of host TZ —
+        // otherwise UTC CI runners return 0, PT returns 480, etc. Creepjs
+        // flags the cross-check between resolvedOptions().timeZone and
+        // getTimezoneOffset().
         let mut rt = setup_runtime("<html><body></body></html>");
         let offset = rt
             .evaluate("new Date().getTimezoneOffset()")
             .unwrap()
             .as_f64()
             .unwrap();
-        assert!(
-            (offset - 300.0).abs() < 1.0 || (offset - 240.0).abs() < 1.0,
-            "expected 300 (EST) or 240 (EDT), got {}",
-            offset
-        );
+        assert_eq!(offset, 300.0);
     }
 
     #[test]

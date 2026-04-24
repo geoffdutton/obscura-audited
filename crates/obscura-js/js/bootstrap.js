@@ -2934,6 +2934,12 @@ _OrigDateTimeFormat.prototype.resolvedOptions = function() {
   return r;
 };
 
+// Pin Date.prototype.getTimezoneOffset to 300 (EST) so it matches the pinned
+// Intl timezone (America/New_York). Otherwise the host's TZ leaks through
+// (0 on CI's UTC runner, 480 on PT, etc.) and creepjs flags the cross-check.
+// We pin to EST rather than DST-aware behavior to keep the answer deterministic.
+Date.prototype.getTimezoneOffset = _markNative(function getTimezoneOffset() { return 300; });
+
 if (typeof PointerEvent === 'undefined') {
   globalThis.PointerEvent = class PointerEvent extends MouseEvent {
     constructor(type, opts={}) { super(type, opts); this.pointerId = opts.pointerId || 0; this.width = opts.width || 1; this.height = opts.height || 1; this.pressure = opts.pressure || 0; this.pointerType = opts.pointerType || 'mouse'; }
