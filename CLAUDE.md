@@ -39,6 +39,8 @@ Cargo workspace, 6 crates under `crates/`:
 cargo build --release                       # default build
 cargo build --release --features stealth    # + anti-detection + tracker blocking
 cargo test                                  # unit tests live inline in src/
+cargo test -p obscura-net                   # single crate — much faster once V8 is cached
+cargo fmt --all && cargo clippy --all-targets --all-features -- -D warnings  # pre-PR
 ./scripts/verify-stealth.sh                 # sannysoft + creepjs bot-detection check
 ```
 
@@ -68,13 +70,15 @@ see `docs/bot-detection-audit.md` before editing:
 
 - `AUDIT.md` — supply-chain + source audit. Read before changing release workflow.
 - `docs/bot-detection-audit.md` — stealth effectiveness, known fingerprint leaks.
-- `.github/workflows/release.yml` — tag-triggered release. Uses SHA-pinned
-  actions + `attest-build-provenance`. Don't regress to tag pins.
+- `.github/workflows/release.yml` — tag-triggered release (push `v*` tag).
+  Uses SHA-pinned actions + `attest-build-provenance`. Don't regress to tag pins.
 - `crates/obscura-js/js/bootstrap.js` — 124KB, most fingerprint logic lives here.
 - `crates/obscura-cdp/src/server.rs` — CDP WebSocket server, 127.0.0.1-only bind.
 
-## License note
+## Fork-inherited mismatches (do not "fix" in passing)
 
-`LICENSE` is Apache 2.0, `README.md` says Apache 2.0, but `Cargo.toml` says
-`license = "MIT"`. Known mismatch from upstream. Don't "fix" in passing —
-coordinate with the repo owner.
+- `LICENSE` and `README.md` say Apache 2.0, but `Cargo.toml` has `license = "MIT"`.
+- `Cargo.toml` still has `repository = "https://github.com/h4ckf0r0day/obscura"`
+  (upstream), not this fork's URL.
+
+Both are known. Coordinate with the repo owner before changing either.
