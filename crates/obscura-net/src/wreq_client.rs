@@ -1,9 +1,9 @@
 #[cfg(feature = "stealth")]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(feature = "stealth")]
 use std::error::Error;
 #[cfg(feature = "stealth")]
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 #[cfg(feature = "stealth")]
 use std::time::Duration;
 
@@ -22,11 +22,37 @@ pub const STEALTH_USER_AGENT: &str =
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36";
 
 #[cfg(feature = "stealth")]
+static CLIENT_HINTS: OnceLock<HashMap<String, String>> = OnceLock::new();
+
+/// Returns the map of all supported UA-CH header name → header value,
+/// loaded once from `data/client_hints.json` at first call.
+#[cfg(feature = "stealth")]
+fn client_hints() -> &'static HashMap<String, String> {
+    CLIENT_HINTS.get_or_init(|| {
+        serde_json::from_str(include_str!("../data/client_hints.json"))
+            .expect("client_hints.json is valid JSON")
+    })
+}
+
+/// Derive the origin key (scheme + host + explicit port) used to scope the
+/// Accept-CH cache, matching Chrome's per-origin semantics.
+#[cfg(feature = "stealth")]
+fn url_origin(url: &Url) -> String {
+    match url.port() {
+        Some(port) => format!("{}://{}:{}", url.scheme(), url.host_str().unwrap_or(""), port),
+        None => format!("{}://{}", url.scheme(), url.host_str().unwrap_or("")),
+    }
+}
+
+#[cfg(feature = "stealth")]
 pub struct StealthHttpClient {
     client: wreq::Client,
     pub cookie_jar: Arc<CookieJar>,
     pub extra_headers: RwLock<HashMap<String, String>>,
     pub in_flight: Arc<std::sync::atomic::AtomicU32>,
+    /// Per-origin set of hint names declared via `Accept-CH`. Only hints whose
+    /// names appear in `client_hints.json` are ever injected.
+    accept_ch_cache: RwLock<HashMap<String, HashSet<String>>>,
 }
 
 #[cfg(feature = "stealth")]
@@ -67,6 +93,7 @@ impl StealthHttpClient {
             cookie_jar,
             extra_headers: RwLock::new(HashMap::new()),
             in_flight: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            accept_ch_cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -84,6 +111,26 @@ impl StealthHttpClient {
 
             for (k, v) in self.extra_headers.read().await.iter() {
                 req = req.header(k.as_str(), v.as_str());
+            }
+
+            // Inject high-entropy hints declared by this origin via Accept-CH.
+            // Collect into a Vec first to release the read-lock before sending.
+            let origin_key = url_origin(&current_url);
+            let hints_to_add: Vec<(String, String)> = {
+                let cache = self.accept_ch_cache.read().await;
+                match cache.get(&origin_key) {
+                    Some(hint_names) => {
+                        let all = client_hints();
+                        hint_names
+                            .iter()
+                            .filter_map(|name| all.get(name).map(|v| (name.clone(), v.clone())))
+                            .collect()
+                    }
+                    None => Vec::new(),
+                }
+            };
+            for (name, val) in &hints_to_add {
+                req = req.header(name.as_str(), val.as_str());
             }
 
             self.in_flight
@@ -119,6 +166,24 @@ impl StealthHttpClient {
                     )
                 })
                 .collect();
+
+            // Update Accept-CH cache: union the advertised hints into the
+            // per-origin set so they are injected on the next same-origin request.
+            if let Some(accept_ch_val) = response_headers.get("accept-ch") {
+                let hints: HashSet<String> = accept_ch_val
+                    .split(',')
+                    .map(|s| s.trim().to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if !hints.is_empty() {
+                    self.accept_ch_cache
+                        .write()
+                        .await
+                        .entry(origin_key)
+                        .or_insert_with(HashSet::new)
+                        .extend(hints);
+                }
+            }
 
             if status.is_redirection() {
                 if let Some(location) = resp.headers().get("location") {
