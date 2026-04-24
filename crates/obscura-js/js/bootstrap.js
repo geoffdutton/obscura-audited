@@ -1,26 +1,43 @@
 "use strict";
 
-globalThis.__obscura_errors = [];
-
-globalThis.addEventListener = globalThis.addEventListener || function(){};
-globalThis.onunhandledrejection = function(e) { if (e?.preventDefault) e.preventDefault(); };
-
-globalThis.onerror = function(msg, src, line, col, error) {
-  globalThis.__obscura_errors.push({msg: String(msg), src: String(src||""), line, error: String(error||"")});
+// Per-page state — lexical, not on globalThis. Invisible to page-script probes
+// (Object.keys/getOwnPropertyNames/in) because these names live only in bootstrap's
+// own scope.
+const _state = {
+  errors: [],
+  listeners: Object.create(null),
+  focused: null,
+  clickTarget: null,
 };
-globalThis.__windowListeners = {};
+
+// Rust-addressable slot. Uses a registered Symbol so page-script string-key probes
+// (Object.keys, getOwnPropertyNames, 'x' in globalThis) don't find it, but Rust can
+// still reach it from injected JS via `globalThis[Symbol.for('obscura')]`.
+const _KEY = Symbol.for('obscura');
+globalThis[_KEY] = {
+  objects: Object.create(null),
+  oid: 0,
+  awaitMeta: null,
+  ua: null,
+  init: null, // assigned at the bottom of this file
+};
+
+globalThis.onunhandledrejection = function(e) { if (e?.preventDefault) e.preventDefault(); };
+globalThis.onerror = function(msg, src, line, col, error) {
+  _state.errors.push({msg: String(msg), src: String(src||""), line, error: String(error||"")});
+};
 globalThis.addEventListener = function(type, fn) {
-  if (!globalThis.__windowListeners[type]) globalThis.__windowListeners[type] = [];
-  globalThis.__windowListeners[type].push(fn);
+  if (!_state.listeners[type]) _state.listeners[type] = [];
+  _state.listeners[type].push(fn);
 };
 globalThis.removeEventListener = function(type, fn) {
-  if (globalThis.__windowListeners[type]) {
-    globalThis.__windowListeners[type] = globalThis.__windowListeners[type].filter(h => h !== fn);
+  if (_state.listeners[type]) {
+    _state.listeners[type] = _state.listeners[type].filter(h => h !== fn);
   }
 };
 globalThis.dispatchEvent = function(event) {
   if (!event) return true;
-  const handlers = globalThis.__windowListeners[event.type] || [];
+  const handlers = _state.listeners[event.type] || [];
   for (const h of handlers) { try { h.call(globalThis, event); } catch(e) { console.error(e); } }
   return !event.defaultPrevented;
 };
@@ -30,16 +47,33 @@ const _Deno = Deno;
 
 const _dom = (cmd, a1, a2) => _Deno.core.ops.op_dom(cmd, String(a1 ?? ""), String(a2 ?? ""));
 
-const _nativeFns = new Set();
+// Use a WeakSet so marked functions can still be GC'd.
+const _nativeFns = new WeakSet();
 const _origToString = Function.prototype.toString;
-Function.prototype.toString = function() {
-  if (_nativeFns.has(this)) {
-    return `function ${this.name || ''}() { [native code] }`;
-  }
-  return _origToString.call(this);
-};
+
+// Proxy around the native toString so all reflective probes (ownKeys,
+// getOwnPropertyDescriptor, 'prototype' in …, class extension) forward to the
+// real builtin. Only the `apply` trap lies, swapping in a `[native code]`
+// stringification for functions we've marked as shims.
+const _toStringProxy = new Proxy(_origToString, {
+  apply(target, thisArg, args) {
+    if (_nativeFns.has(thisArg)) {
+      return `function ${thisArg.name || ''}() { [native code] }`;
+    }
+    return Reflect.apply(target, thisArg, args);
+  },
+});
+
+Object.defineProperty(Function.prototype, 'toString', {
+  value: _toStringProxy,
+  writable: true,
+  enumerable: false,
+  configurable: true,
+});
+
 const _markNative = function(fn) { if (typeof fn === 'function') _nativeFns.add(fn); return fn; };
-_nativeFns.add(Function.prototype.toString);
+_nativeFns.add(_toStringProxy);
+_nativeFns.add(_origToString);
 
 [Error, TypeError, ReferenceError, SyntaxError, RangeError, URIError, EvalError].forEach(E => {
   try {
@@ -494,8 +528,8 @@ class Element extends Node {
       }
     }
   }
-  focus() { globalThis.__obscura_focused = this; globalThis.__obscura_click_target = this; }
-  blur() { if (globalThis.__obscura_focused === this) globalThis.__obscura_focused = null; }
+  focus() { _state.focused = this; _state.clickTarget = this; }
+  blur() { if (_state.focused === this) _state.focused = null; }
   get value() {
     if (_formValues[this._nid] !== undefined) return _formValues[this._nid];
     const tag = this.localName;
@@ -679,11 +713,35 @@ class Element extends Node {
   get scrollTop() { return 0; } set scrollTop(v) {}
   get scrollLeft() { return 0; } set scrollLeft(v) {}
   getBoundingClientRect() {
-    globalThis.__obscura_click_target = this;
+    _state.clickTarget = this;
     return {x:8,y:8,width:100,height:20,top:8,right:108,bottom:28,left:8,toJSON(){return this;}};
   }
-  getClientRects() { return [this.getBoundingClientRect()]; }
-  scrollIntoView() { globalThis.__obscura_click_target = this; }
+  getClientRects() {
+    // Real browsers return one rect per wrapped line. CreepJS probes a narrow
+    // container stuffed with repeated text and expects ≥4. Estimate lines from
+    // parent width and text length — crude but sufficient for the probe shape.
+    const base = this.getBoundingClientRect();
+    const parentW = this.parentNode?.clientWidth || 800;
+    const approxCharW = 7;
+    const text = this.textContent || '';
+    if (!text || parentW <= 0) return [base];
+    const charsPerLine = Math.max(1, Math.floor(parentW / approxCharW));
+    const lines = Math.max(1, Math.ceil(text.length / charsPerLine));
+    if (lines === 1) return [base];
+    const lineH = Math.max(1, Math.round(base.height / lines));
+    const rects = [];
+    for (let i = 0; i < lines; i++) {
+      rects.push({
+        x: base.x, y: base.y + i * lineH,
+        left: base.left, top: base.top + i * lineH,
+        right: base.right, bottom: base.top + (i + 1) * lineH,
+        width: base.width, height: lineH,
+        toJSON() { return this; },
+      });
+    }
+    return rects;
+  }
+  scrollIntoView() { _state.clickTarget = this; }
   animate(keyframes, options) {
     const duration = typeof options === 'number' ? options : (options?.duration || 0);
     return {
@@ -699,6 +757,26 @@ class Element extends Node {
   after() {} before() {} remove() { if (this.parentNode) this.parentNode.removeChild(this); }
   append(...nodes) { for (const n of nodes) { if (typeof n === "string") this.appendChild(document.createTextNode(n)); else this.appendChild(n); } }
   prepend() {}
+}
+
+// CreepJS probes Object.getOwnPropertyDescriptor(Element.prototype, X) for every
+// common DOM accessor. ES class-body getters land on the prototype with
+// enumerable:false, but real browsers make these enumerable accessors, and
+// inherited accessors like textContent (declared on Node) only show via
+// getOwnPropertyDescriptor on the class that owns them. Re-publish the 15 names
+// as own accessor descriptors on Element.prototype with the browser shape.
+for (const _name of [
+  'innerHTML','outerHTML','innerText','textContent','className','id',
+  'tagName','style','children','childElementCount',
+  'clientWidth','clientHeight','offsetWidth','offsetHeight','dataset',
+]) {
+  const _d = Object.getOwnPropertyDescriptor(Element.prototype, _name)
+          ?? Object.getOwnPropertyDescriptor(Node.prototype, _name);
+  if (_d && (_d.get || _d.set)) {
+    Object.defineProperty(Element.prototype, _name, {
+      get: _d.get, set: _d.set, enumerable: true, configurable: true,
+    });
+  }
 }
 
 class Document extends Node {
@@ -748,7 +826,18 @@ class Document extends Node {
   }
   createElementNS(ns, t) {
     const el = this.createElement(t);
-    if (el) el._ns = ns;
+    if (el) {
+      el._ns = ns;
+      // SVG elements get SVG-specific methods (getBBox, getCTM, …) by swapping
+      // their prototype. Root <svg> element gets SVGSVGElement.prototype;
+      // nested SVG tags get SVGGraphicsElement.prototype.
+      if (ns === 'http://www.w3.org/2000/svg') {
+        Object.setPrototypeOf(
+          el,
+          t.toLowerCase() === 'svg' ? SVGSVGElement.prototype : SVGGraphicsElement.prototype,
+        );
+      }
+    }
     return el;
   }
   createTextNode(t) { return _wrap(+_dom("create_text_node", String(t))); }
@@ -866,7 +955,7 @@ class Document extends Node {
     return this.createTreeWalker(root, whatToShow, filter);
   }
   getSelection() { return globalThis.getSelection(); }
-  get activeElement() { return globalThis.__obscura_focused || this.body; }
+  get activeElement() { return _state.focused || this.body; }
   get implementation() {
     return {
       createHTMLDocument(title) { return globalThis.document; },
@@ -1007,8 +1096,72 @@ const _registerIframe = function(iframeEl) {
     enumerable: false,
   });
 };
+// Plugin / MimeType / PluginArray / MimeTypeArray constructors.
+// Sannysoft checks Object.prototype.toString.call(navigator.plugins) and expects
+// `[object PluginArray]`. A plain Array returns `[object Array]`, so we need
+// real classes whose Symbol.toStringTag fixes the toString tag.
+class Plugin {
+  constructor(data) { Object.assign(this, data); }
+  item(i) { return this[i] || null; }
+  namedItem(name) { return this[name] || null; }
+}
+Object.defineProperty(Plugin.prototype, Symbol.toStringTag, { value: 'Plugin' });
+_markNative(Plugin);
+
+class MimeType {
+  constructor(data) { Object.assign(this, data); }
+}
+Object.defineProperty(MimeType.prototype, Symbol.toStringTag, { value: 'MimeType' });
+_markNative(MimeType);
+
+class PluginArray {
+  constructor(items) {
+    for (let i = 0; i < items.length; i++) {
+      this[i] = items[i];
+      this[items[i].name] = items[i];
+    }
+    Object.defineProperty(this, 'length', { value: items.length, enumerable: false });
+  }
+  item(i) { return this[i] || null; }
+  namedItem(name) { return this[name] || null; }
+  refresh() {}
+  [Symbol.iterator]() {
+    let i = 0;
+    return { next: () => i < this.length
+      ? { value: this[i++], done: false }
+      : { value: undefined, done: true } };
+  }
+}
+Object.defineProperty(PluginArray.prototype, Symbol.toStringTag, { value: 'PluginArray' });
+_markNative(PluginArray);
+
+class MimeTypeArray {
+  constructor(items) {
+    for (let i = 0; i < items.length; i++) {
+      this[i] = items[i];
+      this[items[i].type] = items[i];
+    }
+    Object.defineProperty(this, 'length', { value: items.length, enumerable: false });
+  }
+  item(i) { return this[i] || null; }
+  namedItem(name) { return this[name] || null; }
+  [Symbol.iterator]() {
+    let i = 0;
+    return { next: () => i < this.length
+      ? { value: this[i++], done: false }
+      : { value: undefined, done: true } };
+  }
+}
+Object.defineProperty(MimeTypeArray.prototype, Symbol.toStringTag, { value: 'MimeTypeArray' });
+_markNative(MimeTypeArray);
+
+globalThis.Plugin = Plugin;
+globalThis.MimeType = MimeType;
+globalThis.PluginArray = PluginArray;
+globalThis.MimeTypeArray = MimeTypeArray;
+
 globalThis.navigator = {
-  get userAgent() { return globalThis.__obscura_ua || "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"; },
+  get userAgent() { return globalThis[_KEY].ua || "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"; },
   get appVersion() { return this.userAgent.replace('Mozilla/', ''); },
   language: "en-US", languages: ["en-US","en"], platform: "Linux x86_64",
   onLine: true, cookieEnabled: true, hardwareConcurrency: 8,
@@ -1019,26 +1172,22 @@ globalThis.navigator = {
   connection: { effectiveType: "4g", rtt: 50, downlink: 10, saveData: false },
   pdfViewerEnabled: true,
   get plugins() {
-    const p = [
-      { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-      { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-      { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-      { name: "Microsoft Edge PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-      { name: "WebKit built-in PDF", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
+    const pdfMime = new MimeType({ type: 'application/pdf', description: 'Portable Document Format', suffixes: 'pdf', enabledPlugin: null });
+    const items = [
+      new Plugin({ name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: pdfMime }),
+      new Plugin({ name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: pdfMime }),
+      new Plugin({ name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: pdfMime }),
+      new Plugin({ name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: pdfMime }),
+      new Plugin({ name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: pdfMime }),
     ];
-    p.item = (i) => p[i] || null;
-    p.namedItem = (name) => p.find(x => x.name === name) || null;
-    p.refresh = () => {};
-    return p;
+    return new PluginArray(items);
   },
   get mimeTypes() {
-    const m = [
-      { type: "application/pdf", description: "Portable Document Format", suffixes: "pdf", enabledPlugin: null },
-      { type: "text/pdf", description: "Portable Document Format", suffixes: "pdf", enabledPlugin: null },
+    const items = [
+      new MimeType({ type: 'application/pdf', description: 'Portable Document Format', suffixes: 'pdf', enabledPlugin: null }),
+      new MimeType({ type: 'text/pdf', description: 'Portable Document Format', suffixes: 'pdf', enabledPlugin: null }),
     ];
-    m.item = (i) => m[i] || null;
-    m.namedItem = (name) => m.find(x => x.type === name) || null;
-    return m;
+    return new MimeTypeArray(items);
   },
   userAgentData: {
     brands: [
@@ -1089,10 +1238,40 @@ globalThis.navigator = {
 };
 
 globalThis.chrome = {
-  app: { isInstalled: false, InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" }, RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" } },
-  runtime: { OnInstalledReason: {}, OnRestartRequiredReason: {}, PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {}, connect() { return {}; }, sendMessage() {} },
-  csi() { return {}; },
-  loadTimes() { return {}; },
+  app: {
+    isInstalled: false,
+    InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" },
+    RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" },
+    getDetails() { return null; },
+    getIsInstalled() { return false; },
+    runningState() { return "cannot_run"; },
+  },
+  runtime: {
+    // id is intentionally undefined — real Chrome exposes chrome.runtime in page
+    // context but chrome.runtime.id is only set inside extensions.
+    OnInstalledReason: {
+      CHROME_UPDATE: "chrome_update", INSTALL: "install",
+      SHARED_MODULE_UPDATE: "shared_module_update", UPDATE: "update",
+    },
+    OnRestartRequiredReason: { APP_UPDATE: "app_update", OS_UPDATE: "os_update", PERIODIC: "periodic" },
+    PlatformArch: { ARM: "arm", ARM64: "arm64", MIPS: "mips", MIPS64: "mips64", X86_32: "x86-32", X86_64: "x86-64" },
+    PlatformNaclArch: { ARM: "arm", MIPS: "mips", MIPS64: "mips64", X86_32: "x86-32", X86_64: "x86-64" },
+    PlatformOs: { ANDROID: "android", CROS: "cros", LINUX: "linux", MAC: "mac", OPENBSD: "openbsd", WIN: "win" },
+    RequestUpdateCheckStatus: { NO_UPDATE: "no_update", THROTTLED: "throttled", UPDATE_AVAILABLE: "update_available" },
+    connect() { return { onMessage: { addListener(){}, removeListener(){} }, postMessage(){}, disconnect(){} }; },
+    sendMessage() {},
+  },
+  csi() { return { onloadT: Date.now(), pageT: Date.now(), startE: Date.now(), tran: 15 }; },
+  loadTimes() {
+    const t = Date.now() / 1000;
+    return {
+      requestTime: t - 0.5, startLoadTime: t - 0.4, commitLoadTime: t - 0.3,
+      finishDocumentLoadTime: t - 0.2, finishLoadTime: t - 0.1, firstPaintTime: t - 0.05,
+      firstPaintAfterLoadTime: 0, navigationType: "Other", wasFetchedViaSpdy: false,
+      wasNpnNegotiated: true, npnNegotiatedProtocol: "h2", wasAlternateProtocolAvailable: false,
+      connectionInfo: "h2",
+    };
+  },
 };
 
 globalThis.Notification = class Notification {
@@ -1894,8 +2073,68 @@ globalThis.HTMLLegendElement = Element;
 globalThis.HTMLProgressElement = Element;
 globalThis.HTMLDetailsElement = Element;
 globalThis.HTMLDialogElement = Element;
-globalThis.SVGElement = Element;
-globalThis.SVGSVGElement = Element;
+// SVGGraphicsElement / SVGSVGElement carry SVG-only methods like getBBox.
+// Elements created via createElementNS(http://www.w3.org/2000/svg, …) get
+// their prototype swapped to one of these via Object.setPrototypeOf.
+globalThis.SVGElement = class SVGElement extends Element {};
+_markNative(SVGElement);
+globalThis.SVGGraphicsElement = class SVGGraphicsElement extends SVGElement {
+  getBBox() {
+    return { x: 0, y: 0, width: 0, height: 0, toJSON() { return this; } };
+  }
+  getCTM() { return { a:1, b:0, c:0, d:1, e:0, f:0 }; }
+  getScreenCTM() { return { a:1, b:0, c:0, d:1, e:0, f:0 }; }
+};
+_markNative(SVGGraphicsElement);
+globalThis.SVGSVGElement = class SVGSVGElement extends SVGGraphicsElement {
+  createSVGPoint() { return { x:0, y:0, matrixTransform(){ return { x:0, y:0 }; } }; }
+  createSVGRect() { return { x:0, y:0, width:0, height:0 }; }
+};
+_markNative(SVGSVGElement);
+
+// CSS Font Loading API — CreepJS probes `new FontFace(...)` as a side-channel
+// for font enumeration. Missing constructor throws and blows up the branch.
+globalThis.FontFace = class FontFace {
+  constructor(family, source, descriptors) {
+    this.family = String(family);
+    this.style = descriptors?.style || 'normal';
+    this.weight = descriptors?.weight || 'normal';
+    this.stretch = descriptors?.stretch || 'normal';
+    this.unicodeRange = descriptors?.unicodeRange || 'U+0-10FFFF';
+    this.variant = descriptors?.variant || 'normal';
+    this.featureSettings = descriptors?.featureSettings || 'normal';
+    this.display = descriptors?.display || 'auto';
+    this.status = 'unloaded';
+    this._source = source;
+    this.loaded = Promise.resolve(this);
+  }
+  load() { this.status = 'loaded'; return Promise.resolve(this); }
+};
+_markNative(globalThis.FontFace);
+
+globalThis.FontFaceSet = class FontFaceSet {
+  constructor() { this._faces = new Set(); }
+  add(f) { this._faces.add(f); return this; }
+  delete(f) { return this._faces.delete(f); }
+  clear() { this._faces.clear(); }
+  has(f) { return this._faces.has(f); }
+  check() { return true; }
+  load() { return Promise.resolve([]); }
+  forEach(cb) { this._faces.forEach(cb); }
+  get size() { return this._faces.size; }
+  [Symbol.iterator]() { return this._faces[Symbol.iterator](); }
+};
+Object.defineProperty(globalThis.FontFaceSet.prototype, Symbol.toStringTag, { value: 'FontFaceSet' });
+_markNative(globalThis.FontFaceSet);
+
+// document.fonts — a single FontFaceSet shared across document lookups.
+const _documentFonts = new globalThis.FontFaceSet();
+Object.defineProperty(Document.prototype, 'fonts', {
+  get() { return _documentFonts; },
+  enumerable: true,
+  configurable: true,
+});
+
 globalThis.Text = Node;
 globalThis.Comment = Node;
 globalThis.DocumentFragment = DocumentFragment;
@@ -2170,6 +2409,9 @@ class _Canvas2D {
   }
   _parseColor(css) {
     if (!css || css === 'none') return [0,0,0,0];
+    // CanvasGradient / CanvasPattern are valid fillStyle/strokeStyle values
+    // per spec — treat as opaque black rather than crashing on .startsWith.
+    if (typeof css !== 'string') return [0,0,0,255];
     if (css.startsWith('#')) {
       const hex = css.slice(1);
       if (hex.length === 3) return [parseInt(hex[0]+hex[0],16),parseInt(hex[1]+hex[1],16),parseInt(hex[2]+hex[2],16),255];
@@ -2360,40 +2602,92 @@ Element.prototype.getContext = function getContext(type) {
     return this._ctx;
   }
   if (type === 'webgl' || type === 'experimental-webgl' || type === 'webgl2') {
-    return {
+    const VERSION_STR = type === 'webgl2'
+      ? 'WebGL 2.0 (OpenGL ES 3.0 Chromium)'
+      : 'WebGL 1.0 (OpenGL ES 2.0 Chromium)';
+    const SHADING_STR = type === 'webgl2'
+      ? 'WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)'
+      : 'WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)';
+    const attrs = {
+      alpha: true, antialias: true, depth: true, failIfMajorPerformanceCaveat: false,
+      powerPreference: 'default', premultipliedAlpha: true, preserveDrawingBuffer: false,
+      stencil: false, desynchronized: false, xrCompatible: false,
+    };
+    const noop = () => {};
+    const stubFns = [
+      'uniform1f','uniform2f','uniform3f','uniform4f',
+      'uniform1i','uniform2i','uniform3i','uniform4i',
+      'uniform1fv','uniform2fv','uniform3fv','uniform4fv',
+      'uniform1iv','uniform2iv','uniform3iv','uniform4iv',
+      'uniformMatrix2fv','uniformMatrix3fv','uniformMatrix4fv',
+      'vertexAttrib1f','vertexAttrib2f','vertexAttrib3f','vertexAttrib4f',
+      'blendFuncSeparate','blendEquation','blendEquationSeparate','blendColor',
+      'stencilFunc','stencilFuncSeparate','stencilOp','stencilOpSeparate','stencilMask','stencilMaskSeparate',
+      'cullFace','frontFace','lineWidth','polygonOffset','colorMask','depthMask','depthRange','scissor',
+      'bindRenderbuffer','renderbufferStorage','framebufferRenderbuffer',
+      'detachShader','deleteShader','deleteProgram','deleteBuffer','deleteTexture','deleteFramebuffer','deleteRenderbuffer',
+      'bufferSubData','drawBuffers','copyTexImage2D','copyTexSubImage2D','texSubImage2D',
+      'compressedTexImage2D','compressedTexSubImage2D',
+      'hint','flush','finish',
+    ];
+    const gl = {
       canvas: this,
+      drawingBufferWidth: this.width || 300,
+      drawingBufferHeight: this.height || 150,
+      getContextAttributes() { return { ...attrs }; },
       getExtension(name) {
         if (name === 'WEBGL_debug_renderer_info') return { UNMASKED_VENDOR_WEBGL: 0x9245, UNMASKED_RENDERER_WEBGL: 0x9246 };
+        if (name === 'EXT_texture_filter_anisotropic') return { TEXTURE_MAX_ANISOTROPY_EXT: 0x84FE, MAX_TEXTURE_MAX_ANISOTROPY_EXT: 0x84FF };
         return null;
       },
       getParameter(pname) {
         if (pname === 0x9245) return _fp('gpuVendor');
         if (pname === 0x9246) return _fp('gpu');
-        if (pname === 0x1F01) return 'WebKit WebGL';  // GL_RENDERER
-        if (pname === 0x1F00) return 'WebKit';          // GL_VENDOR
-        if (pname === 0x1F02) return 'OpenGL ES 3.0 (ANGLE)'; // GL_VERSION
-        if (pname === 0x8B8C) return 'WebGL GLSL ES 3.00 (ANGLE)'; // GL_SHADING_LANGUAGE_VERSION
+        if (pname === 0x1F00) return 'WebKit';                // GL_VENDOR
+        if (pname === 0x1F01) return 'WebKit WebGL';          // GL_RENDERER
+        if (pname === 0x1F02) return VERSION_STR;             // GL_VERSION — must be a string
+        if (pname === 0x8B8C) return SHADING_STR;             // GL_SHADING_LANGUAGE_VERSION
+        if (pname === 0x0D33) return 16384;                   // MAX_TEXTURE_SIZE
+        if (pname === 0x8869) return 16;                      // MAX_VERTEX_ATTRIBS
+        if (pname === 0x8B4C) return 16;                      // MAX_VERTEX_TEXTURE_IMAGE_UNITS
+        if (pname === 0x8872) return 16;                      // MAX_TEXTURE_IMAGE_UNITS
+        if (pname === 0x84E2) return 16;                      // MAX_COMBINED_TEXTURE_IMAGE_UNITS
         return 0;
       },
-      getSupportedExtensions() { return ['WEBGL_debug_renderer_info','EXT_texture_filter_anisotropic','WEBGL_compressed_texture_s3tc','WEBGL_lose_context']; },
+      getSupportedExtensions() {
+        return ['ANGLE_instanced_arrays','EXT_blend_minmax','EXT_color_buffer_half_float','EXT_disjoint_timer_query',
+          'EXT_float_blend','EXT_frag_depth','EXT_shader_texture_lod','EXT_texture_filter_anisotropic',
+          'OES_element_index_uint','OES_fbo_render_mipmap','OES_standard_derivatives','OES_texture_float',
+          'OES_texture_float_linear','OES_texture_half_float','OES_texture_half_float_linear','OES_vertex_array_object',
+          'WEBGL_color_buffer_float','WEBGL_compressed_texture_s3tc','WEBGL_compressed_texture_s3tc_srgb',
+          'WEBGL_debug_renderer_info','WEBGL_debug_shaders','WEBGL_depth_texture','WEBGL_draw_buffers','WEBGL_lose_context'];
+      },
       getShaderPrecisionFormat() { return { rangeMin: 127, rangeMax: 127, precision: 23 }; },
       createBuffer() { return {}; }, createShader() { return {}; }, createProgram() { return {}; },
-      shaderSource() {}, compileShader() {}, attachShader() {}, linkProgram() {},
-      getProgramParameter() { return true; }, useProgram() {}, deleteShader() {},
-      bindBuffer() {}, bufferData() {}, enableVertexAttribArray() {}, vertexAttribPointer() {},
-      drawArrays() {}, drawElements() {}, viewport() {}, clear() {}, clearColor() {},
-      enable() {}, disable() {}, blendFunc() {}, depthFunc() {},
+      createRenderbuffer() { return {}; },
+      shaderSource: noop, compileShader: noop, attachShader: noop, linkProgram: noop,
+      getProgramParameter() { return true; }, getShaderParameter() { return true; },
+      useProgram: noop,
+      bindBuffer: noop, bufferData: noop,
+      enableVertexAttribArray: noop, vertexAttribPointer: noop,
+      drawArrays: noop, drawElements: noop, viewport: noop,
+      clear: noop, clearColor: noop, clearDepth: noop, clearStencil: noop,
+      enable: noop, disable: noop, blendFunc: noop, depthFunc: noop,
       getUniformLocation() { return {}; }, getAttribLocation() { return 0; },
-      uniform1f() {}, uniform1i() {}, uniformMatrix4fv() {},
-      createTexture() { return {}; }, bindTexture() {}, texImage2D() {}, texParameteri() {},
-      activeTexture() {}, pixelStorei() {}, generateMipmap() {},
-      createFramebuffer() { return {}; }, bindFramebuffer() {}, framebufferTexture2D() {},
-      readPixels(x,y,w,h,f,t,d) { if(d) for(let i=0;i<d.length;i++) d[i]=Math.floor(Math.random()*256); },
+      createTexture() { return {}; }, bindTexture: noop, texImage2D: noop, texParameteri: noop, texParameterf: noop,
+      activeTexture: noop, pixelStorei: noop, generateMipmap: noop,
+      createFramebuffer() { return {}; }, bindFramebuffer: noop, framebufferTexture2D: noop,
+      readPixels(x,y,w,h,f,t,d) { if(d) for(let i=0;i<d.length;i++) d[i] = Math.floor(_fpRand(800+i)*256); },
       VERTEX_SHADER: 0x8B31, FRAGMENT_SHADER: 0x8B30, LINK_STATUS: 0x8B82,
       ARRAY_BUFFER: 0x8892, STATIC_DRAW: 0x88E4, FLOAT: 0x1406,
       TRIANGLES: 0x0004, COLOR_BUFFER_BIT: 0x4000, DEPTH_BUFFER_BIT: 0x100,
       TEXTURE_2D: 0x0DE1, RGBA: 0x1908, UNSIGNED_BYTE: 0x1401,
+      VERSION: 0x1F02, SHADING_LANGUAGE_VERSION: 0x8B8C, VENDOR: 0x1F00, RENDERER: 0x1F01,
+      MAX_TEXTURE_SIZE: 0x0D33, MAX_VERTEX_ATTRIBS: 0x8869,
+      UNPACK_FLIP_Y_WEBGL: 0x9240, UNPACK_PREMULTIPLY_ALPHA_WEBGL: 0x9241,
     };
+    for (const name of stubFns) gl[name] = noop;
+    return gl;
   }
   return null;
 };
@@ -2482,29 +2776,93 @@ Element.prototype.attachShadow = function attachShadow(opts) {
 
 _markNative(Element.prototype.attachShadow);
 
+// AudioParam shape matches what CreepJS probes:
+// {value, defaultValue, minValue, maxValue, setValueAtTime, ...}
+const _AudioParam = (value, minValue, maxValue) => ({
+  value, defaultValue: value, minValue, maxValue,
+  setValueAtTime(){}, setTargetAtTime(){}, linearRampToValueAtTime(){}, exponentialRampToValueAtTime(){},
+  cancelScheduledValues(){}, setValueCurveAtTime(){},
+});
+
 globalThis.AudioContext = class AudioContext {
-  constructor() { this.sampleRate=_fp('audioSampleRate'); this.state='running'; this.currentTime=0; this.baseLatency=_fp('audioBaseLatency'); this.destination={maxChannelCount:2,numberOfInputs:1,numberOfOutputs:0,channelCount:2}; }
-  createOscillator() { return {type:'sine',frequency:{value:440,setValueAtTime(){}},connect(){},start(){},stop(){},disconnect(){},addEventListener(){}}; }
-  createDynamicsCompressor() { return {threshold:{value:_fp('compThreshold')},knee:{value:_fp('compKnee')},ratio:{value:_fp('compRatio')},attack:{value:0.003},release:{value:0.25},reduction:0,connect(){},disconnect(){}}; }
-  createAnalyser() {
-    return {fftSize:2048,frequencyBinCount:1024,connect(){},disconnect(){},
-      getByteFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=Math.floor(_fpRand(600+i)*10);},
-      getFloatFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=-100+_fpRand(700+i)*5;}
+  constructor() {
+    this.sampleRate = _fp('audioSampleRate');
+    this.state = 'running';
+    this.currentTime = 0;
+    this.baseLatency = _fp('audioBaseLatency');
+    this.destination = { maxChannelCount:2, numberOfInputs:1, numberOfOutputs:0, channelCount:2, connect(){}, disconnect(){} };
+    this._listeners = Object.create(null);
+  }
+  addEventListener(type, fn) { (this._listeners[type] ||= []).push(fn); }
+  removeEventListener(type, fn) {
+    if (this._listeners[type]) this._listeners[type] = this._listeners[type].filter(h => h !== fn);
+  }
+  dispatchEvent() { return true; }
+  createOscillator() {
+    return {
+      type: 'sine',
+      frequency: _AudioParam(440, -this.sampleRate/2, this.sampleRate/2),
+      detune: _AudioParam(0, -153600, 153600),
+      connect(){}, start(){}, stop(){}, disconnect(){}, addEventListener(){},
     };
   }
-  createGain() { return {gain:{value:1,setValueAtTime(){}},connect(){},disconnect(){}}; }
-  createBiquadFilter() { return {type:'lowpass',frequency:{value:350},Q:{value:1},connect(){},disconnect(){}}; }
-  createBufferSource() { return {buffer:null,connect(){},start(){},stop(){},disconnect(){},loop:false}; }
-  createBuffer(ch,len,rate) { return {length:len,sampleRate:rate,numberOfChannels:ch,getChannelData(c){return new Float32Array(len);},duration:len/rate}; }
-  createScriptProcessor() { return {connect(){},disconnect(){},onaudioprocess:null}; }
-  decodeAudioData(buf) { return Promise.resolve(this.createBuffer(2,44100,44100)); }
-  resume() { this.state='running'; return Promise.resolve(); }
-  suspend() { this.state='suspended'; return Promise.resolve(); }
-  close() { this.state='closed'; return Promise.resolve(); }
+  createDynamicsCompressor() {
+    return {
+      threshold: _AudioParam(_fp('compThreshold'), -100, 0),
+      knee:      _AudioParam(_fp('compKnee'),       0, 40),
+      ratio:     _AudioParam(_fp('compRatio'),      1, 20),
+      attack:    _AudioParam(0.003, 0, 1),
+      release:   _AudioParam(0.25,  0, 1),
+      reduction: 0,
+      connect(){}, disconnect(){},
+    };
+  }
+  createAnalyser() {
+    return {
+      fftSize: 2048, frequencyBinCount: 1024,
+      minDecibels: -100, maxDecibels: -30, smoothingTimeConstant: 0.8,
+      connect(){}, disconnect(){},
+      // CreepJS expects headless/silent AnalyserNode output — real silence is -Infinity.
+      getByteFrequencyData(a){ for(let i=0;i<a.length;i++) a[i] = 0; },
+      getFloatFrequencyData(a){ for(let i=0;i<a.length;i++) a[i] = -Infinity; },
+      getByteTimeDomainData(a){ for(let i=0;i<a.length;i++) a[i] = 128; },
+      getFloatTimeDomainData(a){ for(let i=0;i<a.length;i++) a[i] = 0; },
+    };
+  }
+  createGain() { return { gain: _AudioParam(1, 0, 3.4e38), connect(){}, disconnect(){} }; }
+  createBiquadFilter() {
+    return {
+      type: 'lowpass',
+      frequency: _AudioParam(350, 0, this.sampleRate/2),
+      detune:    _AudioParam(0, -153600, 153600),
+      Q:         _AudioParam(1, -3.4e38, 3.4e38),
+      gain:      _AudioParam(0, -40, 40),
+      connect(){}, disconnect(){}, getFrequencyResponse(){},
+    };
+  }
+  createBufferSource() {
+    return {
+      buffer: null,
+      playbackRate: _AudioParam(1, -3.4e38, 3.4e38),
+      connect(){}, start(){}, stop(){}, disconnect(){}, loop: false,
+    };
+  }
+  createBuffer(ch, len, rate) { return { length: len, sampleRate: rate, numberOfChannels: ch, getChannelData(){ return new Float32Array(len); }, duration: len/rate }; }
+  createScriptProcessor() { return { connect(){}, disconnect(){}, onaudioprocess: null }; }
+  decodeAudioData(buf) { return Promise.resolve(this.createBuffer(2, 44100, 44100)); }
+  resume() { this.state = 'running'; return Promise.resolve(); }
+  suspend() { this.state = 'suspended'; return Promise.resolve(); }
+  close() { this.state = 'closed'; return Promise.resolve(); }
 };
 globalThis.OfflineAudioContext = class OfflineAudioContext extends AudioContext {
-  constructor(ch,len,rate) { super(); this.length=len||44100; }
-  startRendering() { return Promise.resolve(this.createBuffer(2,this.length,44100)); }
+  constructor(ch, len, rate) {
+    super();
+    // Honor the ctor arg rather than inheriting the random fp sampleRate.
+    if (rate) this.sampleRate = rate;
+    this.length = len || 44100;
+    this.numberOfChannels = ch || 1;
+  }
+  startRendering() { return Promise.resolve(this.createBuffer(this.numberOfChannels, this.length, this.sampleRate)); }
 };
 globalThis.webkitAudioContext = globalThis.AudioContext;
 
@@ -2575,6 +2933,12 @@ _OrigDateTimeFormat.prototype.resolvedOptions = function() {
   if (r.timeZone === 'UTC') r.timeZone = _defaultTZ;
   return r;
 };
+
+// Pin Date.prototype.getTimezoneOffset to 300 (EST) so it matches the pinned
+// Intl timezone (America/New_York). Otherwise the host's TZ leaks through
+// (0 on CI's UTC runner, 480 on PT, etc.) and creepjs flags the cross-check.
+// We pin to EST rather than DST-aware behavior to keep the answer deterministic.
+Date.prototype.getTimezoneOffset = _markNative(function getTimezoneOffset() { return 300; });
 
 if (typeof PointerEvent === 'undefined') {
   globalThis.PointerEvent = class PointerEvent extends MouseEvent {
@@ -2948,7 +3312,7 @@ if (typeof Document !== 'undefined' && !Document.prototype.importNode) {
   Document.prototype.importNode = function(node, deep) { return node?.cloneNode(!!deep) || null; };
 }
 
-globalThis.__obscura_init = function() {
+globalThis[_KEY].init = function() {
   _fpSeed = Date.now() ^ (Math.random() * 0xFFFFFFFF >>> 0);
   _fpCache = null;
 
@@ -2981,5 +3345,5 @@ globalThis.__obscura_init = function() {
     }
   }
   delete globalThis.Deno;
-  delete globalThis.__obscura_init;
+  delete globalThis[_KEY].init;
 };

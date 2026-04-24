@@ -124,7 +124,7 @@ impl Page {
 
                 let _ = js.execute_script(
                     "<reset>",
-                    "_cache.clear(); globalThis.__obscura_objects = {}; globalThis.__obscura_oid = 0; \
+                    "_cache.clear(); globalThis[Symbol.for('obscura')].objects = {}; globalThis[Symbol.for('obscura')].oid = 0; \
                      _iframeRegistry.length = 0; globalThis.length = 0; \
                      globalThis._formValues = {}; globalThis._formChecked = {}; \
                      globalThis._eventRegistry = {}; \
@@ -637,7 +637,7 @@ impl Page {
                     .replace('\\', "\\\\")
                     .replace('`', "\\`")
                     .replace("${", "\\${");
-                let code = format!("globalThis.__obscura_css = `{}`;", escaped);
+                let code = format!("globalThis[Symbol.for('obscura')].css = `{}`;", escaped);
                 let _ = js.execute_script("<css>", &code);
             }
         }

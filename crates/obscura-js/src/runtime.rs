@@ -50,7 +50,7 @@ impl ObscuraJsRuntime {
         runtime
             .execute_script(
                 "<obscura:init>",
-                "globalThis.__obscura_objects = {}; globalThis.__obscura_oid = 0; globalThis.__obscura_init();".to_string(),
+                "globalThis[Symbol.for('obscura')].objects = {}; globalThis[Symbol.for('obscura')].oid = 0; globalThis[Symbol.for('obscura')].init();".to_string(),
             )
             .expect("init should not fail");
 
@@ -103,7 +103,7 @@ impl ObscuraJsRuntime {
         let escaped = ua.replace('\\', "\\\\").replace('\'', "\\'");
         let _ = self.runtime.execute_script(
             "<set-ua>",
-            format!("globalThis.__obscura_ua = '{}';", escaped),
+            format!("globalThis[Symbol.for('obscura')].ua = '{}';", escaped),
         );
     }
     pub fn evaluate(&mut self, expression: &str) -> Result<serde_json::Value, String> {
@@ -132,7 +132,7 @@ impl ObscuraJsRuntime {
             "(function() {{\n\
                 var __result;\n\
                 try {{ __result = ({expr}); }} catch(e) {{ __result = undefined; }}\n\
-                globalThis.__obscura_objects['{oid}'] = __result;\n\
+                globalThis[Symbol.for('obscura')].objects['{oid}'] = __result;\n\
                 return {meta_fn};\n\
             }})()",
             expr = expression,
@@ -153,7 +153,7 @@ impl ObscuraJsRuntime {
         };
         self.object_store.insert(
             oid.clone(),
-            format!("globalThis.__obscura_objects['{}']", oid),
+            format!("globalThis[Symbol.for('obscura')].objects['{}']", oid),
         );
 
         Ok(Self::info_from_meta(&meta_json, Some(oid)))
@@ -180,8 +180,8 @@ impl ObscuraJsRuntime {
                     var __fn = ({fn_decl});\n\
                     var __this = ({this_expr});\n\
                     var __result = await __fn.call(__this, {args});\n\
-                    globalThis.__obscura_objects['{oid}'] = __result;\n\
-                    globalThis.__obscura_await_meta = {meta_fn};\n\
+                    globalThis[Symbol.for('obscura')].objects['{oid}'] = __result;\n\
+                    globalThis[Symbol.for('obscura')].awaitMeta = {meta_fn};\n\
                 }})()",
                 setup = setup,
                 fn_decl = function_declaration,
@@ -202,7 +202,7 @@ impl ObscuraJsRuntime {
                     .runtime
                     .execute_script(
                         "<readResult>",
-                        format!("globalThis.__obscura_objects['{}']", oid),
+                        format!("globalThis[Symbol.for('obscura')].objects['{}']", oid),
                     )
                     .map_err(|e| format!("JS error: {}", e))?;
                 let json_val = self.v8_to_json(read)?;
@@ -211,7 +211,10 @@ impl ObscuraJsRuntime {
 
             let meta_result = self
                 .runtime
-                .execute_script("<readMeta>", "globalThis.__obscura_await_meta".to_string())
+                .execute_script(
+                    "<readMeta>",
+                    "globalThis[Symbol.for('obscura')].awaitMeta".to_string(),
+                )
                 .map_err(|e| format!("JS error: {}", e))?;
             let meta_str = self.v8_to_json(meta_result)?;
             let meta_json = if let serde_json::Value::String(s) = &meta_str {
@@ -221,7 +224,7 @@ impl ObscuraJsRuntime {
             };
             self.object_store.insert(
                 oid.clone(),
-                format!("globalThis.__obscura_objects['{}']", oid),
+                format!("globalThis[Symbol.for('obscura')].objects['{}']", oid),
             );
             return Ok(Self::info_from_meta(&meta_json, Some(oid)));
         }
@@ -253,7 +256,7 @@ impl ObscuraJsRuntime {
                 var __fn = ({fn_decl});\n\
                 var __this = ({this_expr});\n\
                 var __result = __fn.call(__this, {args});\n\
-                globalThis.__obscura_objects['{oid}'] = __result;\n\
+                globalThis[Symbol.for('obscura')].objects['{oid}'] = __result;\n\
                 return {meta_fn};\n\
             }})()",
             setup = setup,
@@ -275,7 +278,7 @@ impl ObscuraJsRuntime {
         };
         self.object_store.insert(
             oid.clone(),
-            format!("globalThis.__obscura_objects['{}']", oid),
+            format!("globalThis[Symbol.for('obscura')].objects['{}']", oid),
         );
         Ok(Self::info_from_meta(&meta_json, Some(oid)))
     }
@@ -299,7 +302,7 @@ impl ObscuraJsRuntime {
         self.object_counter += 1;
         let oid = self.make_oid(self.object_counter);
         let code = format!(
-            "globalThis.__obscura_objects['{}'] = ({});",
+            "globalThis[Symbol.for('obscura')].objects['{}'] = ({});",
             oid, js_expression,
         );
         self.runtime
@@ -307,7 +310,7 @@ impl ObscuraJsRuntime {
             .map_err(|e| format!("Store error: {}", e))?;
         self.object_store.insert(
             oid.clone(),
-            format!("globalThis.__obscura_objects['{}']", oid),
+            format!("globalThis[Symbol.for('obscura')].objects['{}']", oid),
         );
         Ok(oid)
     }
@@ -321,7 +324,7 @@ impl ObscuraJsRuntime {
         let code = format!(
             "(function() {{\n\
                 var __result = ({expr});\n\
-                globalThis.__obscura_objects['{oid}'] = __result;\n\
+                globalThis[Symbol.for('obscura')].objects['{oid}'] = __result;\n\
                 return {meta_fn};\n\
             }})()",
             expr = js_expression,
@@ -340,14 +343,17 @@ impl ObscuraJsRuntime {
         };
         self.object_store.insert(
             oid.clone(),
-            format!("globalThis.__obscura_objects['{}']", oid),
+            format!("globalThis[Symbol.for('obscura')].objects['{}']", oid),
         );
         Ok(Self::info_from_meta(&meta_json, Some(oid)))
     }
 
     pub fn release_object(&mut self, object_id: &str) {
         if self.object_store.remove(object_id).is_some() {
-            let code = format!("delete globalThis.__obscura_objects['{}'];", object_id,);
+            let code = format!(
+                "delete globalThis[Symbol.for('obscura')].objects['{}'];",
+                object_id,
+            );
             let _ = self.runtime.execute_script("<release>", code);
         }
     }
@@ -355,7 +361,7 @@ impl ObscuraJsRuntime {
     pub fn release_object_group(&mut self) {
         let _ = self.runtime.execute_script(
             "<releaseGroup>",
-            "globalThis.__obscura_objects = {};".to_string(),
+            "globalThis[Symbol.for('obscura')].objects = {};".to_string(),
         );
         self.object_store.clear();
     }
@@ -1660,5 +1666,605 @@ mod tests {
         assert!(html.starts_with("<!DOCTYPE html>"));
         assert!(html.contains("<html>"));
         assert!(html.contains("<p>Test</p>"));
+    }
+
+    #[test]
+    fn test_no_obscura_prefixed_globals() {
+        // Real Chrome has no `__obscura_*` or `__windowListeners` properties on window.
+        // Even non-enumerable ones leak via `in` and `Object.getOwnPropertyNames`.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let leaked = rt
+            .evaluate(
+                r#"Object.getOwnPropertyNames(globalThis)
+                     .filter(k => k.startsWith('__obscura') || k === '__windowListeners')"#,
+            )
+            .unwrap();
+        assert_eq!(
+            leaked,
+            serde_json::json!([]),
+            "no __obscura_* or __windowListeners names must remain on globalThis: {:?}",
+            leaked
+        );
+    }
+
+    #[test]
+    fn test_in_operator_cannot_detect_obscura() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let detected = rt
+            .evaluate(
+                r#"['__obscura_errors','__obscura_click_target','__obscura_focused',
+                    '__obscura_ua','__obscura_init','__obscura_objects','__obscura_oid',
+                    '__windowListeners']
+                     .filter(k => k in globalThis)"#,
+            )
+            .unwrap();
+        assert_eq!(detected, serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_click_target_still_tracked_after_scrub() {
+        // The scrub must not break internal click-target tracking; just make it invisible.
+        // click() / focus() write to _state.clickTarget; this test guards against the
+        // refactor introducing a ReferenceError or similar crash in those call sites.
+        let mut rt = setup_runtime(r#"<html><body><div id="x">hi</div></body></html>"#);
+        let ok = rt
+            .evaluate(r#"(function(){ document.getElementById('x').click(); return true; })()"#)
+            .unwrap();
+        assert_eq!(ok, serde_json::json!(true));
+    }
+
+    #[test]
+    fn test_function_tostring_has_no_prototype() {
+        // Native functions have no `prototype` own property; creepjs uses this as a probe.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let has_proto = rt
+            .evaluate("'prototype' in Function.prototype.toString")
+            .unwrap();
+        assert_eq!(has_proto, serde_json::json!(false));
+    }
+
+    #[test]
+    fn test_function_tostring_ownkeys_shape() {
+        // Native functions expose exactly ['length','name'] as own keys.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let keys = rt
+            .evaluate("Reflect.ownKeys(Function.prototype.toString).sort()")
+            .unwrap();
+        assert_eq!(keys, serde_json::json!(["length", "name"]));
+    }
+
+    #[test]
+    fn test_function_tostring_name_descriptor() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let desc = rt
+            .evaluate(
+                r#"(function() {
+                    const d = Object.getOwnPropertyDescriptor(Function.prototype.toString, 'name');
+                    return { value: d.value, writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            desc,
+            serde_json::json!({
+                "value": "toString", "writable": false, "enumerable": false, "configurable": true
+            })
+        );
+    }
+
+    #[test]
+    fn test_function_tostring_length_is_zero() {
+        // Native Function.prototype.toString has length 0 — V8 surfaces JS numbers as
+        // f64, so compare via as_f64() rather than serde integer equality.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let len = rt.evaluate("Function.prototype.toString.length").unwrap();
+        assert_eq!(len.as_f64().unwrap(), 0.0);
+    }
+
+    #[test]
+    fn test_class_extends_function_tostring_throws() {
+        // Real Chrome throws TypeError when you try to `class Foo extends <native fn>`.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let threw = rt
+            .evaluate(
+                r#"(function() {
+                    try { eval('class Foo extends Function.prototype.toString {}'); return false; }
+                    catch(e) { return e instanceof TypeError; }
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(threw, serde_json::json!(true));
+    }
+
+    #[test]
+    fn test_function_tostring_self_describes_native() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let s = rt
+            .evaluate("Function.prototype.toString.toString()")
+            .unwrap();
+        assert_eq!(s.as_str().unwrap(), "function toString() { [native code] }");
+    }
+
+    #[test]
+    fn test_element_prototype_innerhtml_descriptor() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let shape = rt
+            .evaluate(
+                r#"(function() {
+                    const d = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+                    return d ? { hasGet: typeof d.get === 'function',
+                                 hasSet: typeof d.set === 'function',
+                                 enumerable: d.enumerable,
+                                 configurable: d.configurable } : null;
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            shape,
+            serde_json::json!({
+                "hasGet": true, "hasSet": true, "enumerable": true, "configurable": true
+            }),
+            "Element.prototype.innerHTML must be a configurable/enumerable accessor"
+        );
+    }
+
+    #[test]
+    fn test_element_prototype_has_core_accessors() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let missing = rt
+            .evaluate(
+                r#"['innerHTML','outerHTML','innerText','textContent','className','id',
+                    'tagName','style','children','childElementCount',
+                    'clientWidth','clientHeight','offsetWidth','offsetHeight','dataset']
+                     .filter(p => !Object.getOwnPropertyDescriptor(Element.prototype, p))"#,
+            )
+            .unwrap();
+        assert_eq!(missing, serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_element_accessors_still_functional() {
+        // Descriptor moves must not break actual DOM behavior.
+        let mut rt = setup_runtime(r#"<html><body><div id="x" class="a">hi</div></body></html>"#);
+        assert_eq!(
+            rt.evaluate("document.getElementById('x').id").unwrap(),
+            serde_json::json!("x")
+        );
+        assert_eq!(
+            rt.evaluate("document.getElementById('x').className")
+                .unwrap(),
+            serde_json::json!("a")
+        );
+        assert_eq!(
+            rt.evaluate("document.getElementById('x').tagName").unwrap(),
+            serde_json::json!("DIV")
+        );
+        rt.evaluate("document.getElementById('x').innerHTML = '<b>y</b>'")
+            .unwrap();
+        let html = rt
+            .evaluate("document.getElementById('x').innerHTML")
+            .unwrap();
+        assert_eq!(html.as_str().unwrap().to_lowercase(), "<b>y</b>");
+    }
+
+    #[test]
+    fn test_navigator_plugins_is_plugin_array() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("Object.prototype.toString.call(navigator.plugins)")
+                .unwrap(),
+            serde_json::json!("[object PluginArray]")
+        );
+        assert_eq!(
+            rt.evaluate("Object.prototype.toString.call(navigator.mimeTypes)")
+                .unwrap(),
+            serde_json::json!("[object MimeTypeArray]")
+        );
+        assert!(
+            rt.evaluate("navigator.plugins.length")
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                > 0.0
+        );
+        assert_eq!(
+            rt.evaluate("navigator.plugins[0] && typeof navigator.plugins[0].name")
+                .unwrap(),
+            serde_json::json!("string")
+        );
+    }
+
+    #[test]
+    fn test_plugin_instances_are_plugin_type() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("Object.prototype.toString.call(navigator.plugins[0])")
+                .unwrap(),
+            serde_json::json!("[object Plugin]")
+        );
+    }
+
+    #[test]
+    fn test_plugin_constructors_on_global_this() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let shape = rt
+            .evaluate(
+                r#"['Plugin','MimeType','PluginArray','MimeTypeArray']
+                     .map(n => typeof globalThis[n])"#,
+            )
+            .unwrap();
+        assert_eq!(
+            shape,
+            serde_json::json!(["function", "function", "function", "function"])
+        );
+    }
+
+    #[test]
+    fn test_chrome_object_shape_matches_browser() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("typeof window.chrome.app.isInstalled").unwrap(),
+            serde_json::json!("boolean")
+        );
+        assert_eq!(
+            rt.evaluate("window.chrome.app.isInstalled").unwrap(),
+            serde_json::json!(false)
+        );
+        let install_states = rt
+            .evaluate("Object.keys(window.chrome.app.InstallState).sort()")
+            .unwrap();
+        assert_eq!(
+            install_states,
+            serde_json::json!(["DISABLED", "INSTALLED", "NOT_INSTALLED"])
+        );
+        let run_states = rt
+            .evaluate("Object.keys(window.chrome.app.RunningState).sort()")
+            .unwrap();
+        assert_eq!(
+            run_states,
+            serde_json::json!(["CANNOT_RUN", "READY_TO_RUN", "RUNNING"])
+        );
+        let installed_reason = rt
+            .evaluate("Object.keys(window.chrome.runtime.OnInstalledReason).sort()")
+            .unwrap();
+        assert_eq!(
+            installed_reason,
+            serde_json::json!(["CHROME_UPDATE", "INSTALL", "SHARED_MODULE_UPDATE", "UPDATE"])
+        );
+        // chrome.runtime.id is undefined in non-extension page contexts.
+        assert_eq!(
+            rt.evaluate("typeof window.chrome.runtime.id").unwrap(),
+            serde_json::json!("undefined")
+        );
+    }
+
+    #[test]
+    fn test_audiocontext_has_samplerate_and_listener() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("typeof new AudioContext().sampleRate").unwrap(),
+            serde_json::json!("number")
+        );
+        assert_eq!(
+            rt.evaluate("typeof new AudioContext().addEventListener")
+                .unwrap(),
+            serde_json::json!("function")
+        );
+    }
+
+    #[test]
+    fn test_offlineaudiocontext_has_samplerate() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("new OfflineAudioContext(1,44100,44100).sampleRate")
+                .unwrap()
+                .as_f64()
+                .unwrap(),
+            44100.0
+        );
+    }
+
+    #[test]
+    fn test_dynamics_compressor_audioparam_ranges() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let shape = rt
+            .evaluate(
+                r#"(function() {
+                    const ac = new AudioContext();
+                    const c = ac.createDynamicsCompressor();
+                    return {
+                        thresholdMax: typeof c.threshold.maxValue,
+                        thresholdMin: typeof c.threshold.minValue,
+                        ratioDefault: typeof c.ratio.defaultValue,
+                    };
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            shape,
+            serde_json::json!({
+                "thresholdMax": "number",
+                "thresholdMin": "number",
+                "ratioDefault": "number"
+            })
+        );
+    }
+
+    #[test]
+    fn test_analyser_get_float_frequency_is_silence() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let all_ninf = rt
+            .evaluate(
+                r#"(function() {
+                    const ac = new AudioContext();
+                    const an = ac.createAnalyser();
+                    const buf = new Float32Array(an.frequencyBinCount);
+                    an.getFloatFrequencyData(buf);
+                    for (let i = 0; i < buf.length; i++) if (buf[i] !== -Infinity) return false;
+                    return true;
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(all_ninf, serde_json::json!(true));
+    }
+
+    #[test]
+    fn test_date_prototype_methods_are_functions() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let bad = rt
+            .evaluate(
+                r#"['getTime','toString','toISOString','toJSON','valueOf','getTimezoneOffset',
+                    'getFullYear','getUTCFullYear','getMonth','getDate','getDay',
+                    'getHours','getMinutes','getSeconds','getMilliseconds']
+                     .filter(m => typeof Date.prototype[m] !== 'function')"#,
+            )
+            .unwrap();
+        assert_eq!(bad, serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_date_instance_roundtrip_with_intl() {
+        // Calling Intl.DateTimeFormat.format on a Date must succeed and return a string.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("typeof new Intl.DateTimeFormat('en-US').format(new Date(0))")
+                .unwrap(),
+            serde_json::json!("string")
+        );
+        // And instanceof must work.
+        assert_eq!(
+            rt.evaluate("new Intl.DateTimeFormat('en-US') instanceof Intl.DateTimeFormat")
+                .unwrap(),
+            serde_json::json!(true)
+        );
+    }
+
+    #[test]
+    fn test_date_tostring_timezone_consistent() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let tz = rt
+            .evaluate("new Intl.DateTimeFormat().resolvedOptions().timeZone")
+            .unwrap();
+        assert_eq!(tz, serde_json::json!("America/New_York"));
+    }
+
+    #[test]
+    fn test_get_timezone_offset_matches_pinned_tz() {
+        // Pinned to 300 (EST) in bootstrap.js so it stays consistent with the
+        // pinned Intl timezone (America/New_York) regardless of host TZ —
+        // otherwise UTC CI runners return 0, PT returns 480, etc. Creepjs
+        // flags the cross-check between resolvedOptions().timeZone and
+        // getTimezoneOffset().
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let offset = rt
+            .evaluate("new Date().getTimezoneOffset()")
+            .unwrap()
+            .as_f64()
+            .unwrap();
+        assert_eq!(offset, 300.0);
+    }
+
+    #[test]
+    fn test_canvas_fill_with_gradient_does_not_throw() {
+        // CanvasGradient is a valid fillStyle per spec; _parseColor must not
+        // crash on it. CreepJS's drawOutlineOfText hits this path.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt
+            .evaluate(
+                r#"(function() {
+                    try {
+                        const c = document.createElement('canvas'); c.width=100; c.height=100;
+                        const ctx = c.getContext('2d');
+                        const g = ctx.createLinearGradient(0,0,100,0);
+                        g.addColorStop(0,'red'); g.addColorStop(1,'blue');
+                        ctx.fillStyle = g;
+                        ctx.fillRect(0,0,100,100);
+                        ctx.fillText('x',10,10);
+                        return 'ok';
+                    } catch(e) { return 'threw:' + e.message; }
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!("ok"));
+    }
+
+    #[test]
+    fn test_svg_get_bbox_returns_domrect_shape() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let shape = rt
+            .evaluate(
+                r#"(function() {
+                    const s = document.createElementNS('http://www.w3.org/2000/svg','svg');
+                    document.body.appendChild(s);
+                    const r = s.getBBox();
+                    return { x: typeof r.x, y: typeof r.y, width: typeof r.width, height: typeof r.height };
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            shape,
+            serde_json::json!({ "x": "number", "y": "number", "width": "number", "height": "number" })
+        );
+    }
+
+    #[test]
+    fn test_canvas_parsecolor_handles_object_fillstyle() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt
+            .evaluate(
+                r#"(function() {
+                    const c = document.createElement('canvas');
+                    const ctx = c.getContext('2d');
+                    ctx.fillStyle = ctx.createPattern(c, 'repeat');
+                    try { ctx._parseColor(ctx.fillStyle); return 'ok'; }
+                    catch(e) { return 'threw:' + e.message; }
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!("ok"));
+    }
+
+    #[test]
+    fn test_fontface_constructor_and_document_fonts() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("typeof FontFace").unwrap(),
+            serde_json::json!("function")
+        );
+        let shape = rt
+            .evaluate(
+                r#"(function() {
+                    const f = new FontFace('Foo', 'url(x.woff2)');
+                    return { family: f.family, status: f.status,
+                             hasLoad: typeof f.load === 'function' };
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            shape,
+            serde_json::json!({ "family": "Foo", "status": "unloaded", "hasLoad": true })
+        );
+        assert_eq!(
+            rt.evaluate("typeof document.fonts.check").unwrap(),
+            serde_json::json!("function")
+        );
+        assert_eq!(
+            rt.evaluate("document.fonts.check('12px Arial')").unwrap(),
+            serde_json::json!(true)
+        );
+    }
+
+    #[test]
+    fn test_webgl_has_uniform2f_and_attributes() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt
+            .evaluate(
+                r#"(function() {
+                    const gl = document.createElement('canvas').getContext('webgl');
+                    return {
+                        u2f: typeof gl.uniform2f,
+                        u3f: typeof gl.uniform3f,
+                        u4f: typeof gl.uniform4f,
+                        attrs: typeof gl.getContextAttributes,
+                    };
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!({ "u2f": "function", "u3f": "function", "u4f": "function", "attrs": "function" })
+        );
+    }
+
+    #[test]
+    fn test_webgl_version_is_string() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let v = rt
+            .evaluate(
+                r#"(function() {
+                    const gl = document.createElement('canvas').getContext('webgl');
+                    return gl.getParameter(gl.VERSION);
+                })()"#,
+            )
+            .unwrap();
+        let s = v.as_str().expect("VERSION must be a string");
+        assert!(
+            s.to_lowercase().contains("webgl") || s.to_lowercase().contains("opengl"),
+            "VERSION must mention WebGL or OpenGL: {}",
+            s
+        );
+    }
+
+    #[test]
+    fn test_webgl_context_attributes_shape() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let attrs = rt
+            .evaluate(
+                r#"(function() {
+                    const gl = document.createElement('canvas').getContext('webgl');
+                    return gl.getContextAttributes();
+                })()"#,
+            )
+            .unwrap();
+        let obj = attrs.as_object().expect("attributes must be an object");
+        for key in &[
+            "alpha",
+            "depth",
+            "stencil",
+            "antialias",
+            "premultipliedAlpha",
+            "preserveDrawingBuffer",
+        ] {
+            assert!(obj.contains_key(*key), "missing attribute: {}", key);
+        }
+    }
+
+    #[test]
+    fn test_get_client_rects_for_wrapped_text_returns_multiple() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let count = rt
+            .evaluate(
+                r#"(function() {
+                    const d = document.createElement('div');
+                    d.style.width = '50px';
+                    d.innerHTML = '<span>' + ('word ').repeat(20) + '</span>';
+                    document.body.appendChild(d);
+                    return d.querySelector('span').getClientRects().length;
+                })()"#,
+            )
+            .unwrap();
+        let n = count.as_f64().unwrap() as i32;
+        assert!(n >= 2, "expected ≥2 client rects, got {}", n);
+    }
+
+    #[test]
+    fn test_iframe_content_document_is_object() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let ty = rt
+            .evaluate(
+                r#"(function() {
+                    const f = document.createElement('iframe');
+                    document.body.appendChild(f);
+                    return typeof f.contentDocument;
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(ty, serde_json::json!("object"));
+    }
+
+    #[test]
+    fn test_iframe_content_window_is_object_after_content_document() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let ty = rt
+            .evaluate(
+                r#"(function() {
+                    const f = document.createElement('iframe');
+                    document.body.appendChild(f);
+                    f.contentDocument; // force lazy init
+                    return typeof f.contentWindow;
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(ty, serde_json::json!("object"));
     }
 }
