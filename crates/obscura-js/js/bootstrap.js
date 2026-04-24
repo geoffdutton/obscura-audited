@@ -1,26 +1,43 @@
 "use strict";
 
-globalThis.__obscura_errors = [];
-
-globalThis.addEventListener = globalThis.addEventListener || function(){};
-globalThis.onunhandledrejection = function(e) { if (e?.preventDefault) e.preventDefault(); };
-
-globalThis.onerror = function(msg, src, line, col, error) {
-  globalThis.__obscura_errors.push({msg: String(msg), src: String(src||""), line, error: String(error||"")});
+// Per-page state — lexical, not on globalThis. Invisible to page-script probes
+// (Object.keys/getOwnPropertyNames/in) because these names live only in bootstrap's
+// own scope.
+const _state = {
+  errors: [],
+  listeners: Object.create(null),
+  focused: null,
+  clickTarget: null,
 };
-globalThis.__windowListeners = {};
+
+// Rust-addressable slot. Uses a registered Symbol so page-script string-key probes
+// (Object.keys, getOwnPropertyNames, 'x' in globalThis) don't find it, but Rust can
+// still reach it from injected JS via `globalThis[Symbol.for('obscura')]`.
+const _KEY = Symbol.for('obscura');
+globalThis[_KEY] = {
+  objects: Object.create(null),
+  oid: 0,
+  awaitMeta: null,
+  ua: null,
+  init: null, // assigned at the bottom of this file
+};
+
+globalThis.onunhandledrejection = function(e) { if (e?.preventDefault) e.preventDefault(); };
+globalThis.onerror = function(msg, src, line, col, error) {
+  _state.errors.push({msg: String(msg), src: String(src||""), line, error: String(error||"")});
+};
 globalThis.addEventListener = function(type, fn) {
-  if (!globalThis.__windowListeners[type]) globalThis.__windowListeners[type] = [];
-  globalThis.__windowListeners[type].push(fn);
+  if (!_state.listeners[type]) _state.listeners[type] = [];
+  _state.listeners[type].push(fn);
 };
 globalThis.removeEventListener = function(type, fn) {
-  if (globalThis.__windowListeners[type]) {
-    globalThis.__windowListeners[type] = globalThis.__windowListeners[type].filter(h => h !== fn);
+  if (_state.listeners[type]) {
+    _state.listeners[type] = _state.listeners[type].filter(h => h !== fn);
   }
 };
 globalThis.dispatchEvent = function(event) {
   if (!event) return true;
-  const handlers = globalThis.__windowListeners[event.type] || [];
+  const handlers = _state.listeners[event.type] || [];
   for (const h of handlers) { try { h.call(globalThis, event); } catch(e) { console.error(e); } }
   return !event.defaultPrevented;
 };
@@ -494,8 +511,8 @@ class Element extends Node {
       }
     }
   }
-  focus() { globalThis.__obscura_focused = this; globalThis.__obscura_click_target = this; }
-  blur() { if (globalThis.__obscura_focused === this) globalThis.__obscura_focused = null; }
+  focus() { _state.focused = this; _state.clickTarget = this; }
+  blur() { if (_state.focused === this) _state.focused = null; }
   get value() {
     if (_formValues[this._nid] !== undefined) return _formValues[this._nid];
     const tag = this.localName;
@@ -679,11 +696,11 @@ class Element extends Node {
   get scrollTop() { return 0; } set scrollTop(v) {}
   get scrollLeft() { return 0; } set scrollLeft(v) {}
   getBoundingClientRect() {
-    globalThis.__obscura_click_target = this;
+    _state.clickTarget = this;
     return {x:8,y:8,width:100,height:20,top:8,right:108,bottom:28,left:8,toJSON(){return this;}};
   }
   getClientRects() { return [this.getBoundingClientRect()]; }
-  scrollIntoView() { globalThis.__obscura_click_target = this; }
+  scrollIntoView() { _state.clickTarget = this; }
   animate(keyframes, options) {
     const duration = typeof options === 'number' ? options : (options?.duration || 0);
     return {
@@ -866,7 +883,7 @@ class Document extends Node {
     return this.createTreeWalker(root, whatToShow, filter);
   }
   getSelection() { return globalThis.getSelection(); }
-  get activeElement() { return globalThis.__obscura_focused || this.body; }
+  get activeElement() { return _state.focused || this.body; }
   get implementation() {
     return {
       createHTMLDocument(title) { return globalThis.document; },
@@ -1008,7 +1025,7 @@ const _registerIframe = function(iframeEl) {
   });
 };
 globalThis.navigator = {
-  get userAgent() { return globalThis.__obscura_ua || "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"; },
+  get userAgent() { return globalThis[_KEY].ua || "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"; },
   get appVersion() { return this.userAgent.replace('Mozilla/', ''); },
   language: "en-US", languages: ["en-US","en"], platform: "Linux x86_64",
   onLine: true, cookieEnabled: true, hardwareConcurrency: 8,
@@ -2948,7 +2965,7 @@ if (typeof Document !== 'undefined' && !Document.prototype.importNode) {
   Document.prototype.importNode = function(node, deep) { return node?.cloneNode(!!deep) || null; };
 }
 
-globalThis.__obscura_init = function() {
+globalThis[_KEY].init = function() {
   _fpSeed = Date.now() ^ (Math.random() * 0xFFFFFFFF >>> 0);
   _fpCache = null;
 
@@ -2981,5 +2998,5 @@ globalThis.__obscura_init = function() {
     }
   }
   delete globalThis.Deno;
-  delete globalThis.__obscura_init;
+  delete globalThis[_KEY].init;
 };
