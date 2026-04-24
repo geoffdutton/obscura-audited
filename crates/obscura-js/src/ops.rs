@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 
 use deno_core::op2;
 use deno_core::Extension;
+use deno_core::JsBuffer;
 use deno_core::OpState;
 use obscura_dom::{DomTree, NodeData, NodeId};
 use obscura_net::{validate_pna, CookieJar, ObscuraHttpClient, RequestInitiator};
@@ -707,6 +708,29 @@ fn op_navigate(state: &OpState, #[string] url: &str, #[string] method: &str, #[s
     gs.pending_navigation = Some((url.to_string(), method.to_string(), body.to_string()));
 }
 
+#[op2]
+#[string]
+fn op_canvas_encode_png(
+    #[smi] width: u32,
+    #[smi] height: u32,
+    #[buffer(detach)] buf: JsBuffer,
+) -> Result<String, deno_error::JsErrorBox> {
+    use base64::Engine;
+    let mut raw: Vec<u8> = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut raw, width, height);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut writer = enc
+            .write_header()
+            .map_err(|e| deno_error::JsErrorBox::generic(e.to_string()))?;
+        writer
+            .write_image_data(&buf)
+            .map_err(|e| deno_error::JsErrorBox::generic(e.to_string()))?;
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(&raw))
+}
+
 pub fn build_extension() -> Extension {
     Extension {
         name: "obscura_dom",
@@ -717,6 +741,7 @@ pub fn build_extension() -> Extension {
             op_get_cookies(),
             op_set_cookie(),
             op_navigate(),
+            op_canvas_encode_png(),
         ]),
         ..Default::default()
     }

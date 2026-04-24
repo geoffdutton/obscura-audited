@@ -2162,6 +2162,35 @@ mod tests {
     }
 
     #[test]
+    fn test_canvas_to_data_url_real_png() {
+        // Rule 3: toDataURL() must return a structurally valid PNG whose IHDR
+        // dimensions match the canvas size, and must be stable across calls.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt
+            .evaluate(
+                r#"(function() {
+                    const c = document.createElement('canvas'); c.width = 220; c.height = 30;
+                    const ctx = c.getContext('2d'); ctx.fillText('x', 0, 0);
+                    const a = c.toDataURL(), b = c.toDataURL();
+                    const bin = atob(a.slice(a.indexOf(',') + 1));
+                    const bytes = Uint8Array.from(bin, function(x) { return x.charCodeAt(0); });
+                    const sig = [137,80,78,71,13,10,26,10].every(function(v, i) { return bytes[i] === v; });
+                    const w = (bytes[16]<<24)|(bytes[17]<<16)|(bytes[18]<<8)|bytes[19];
+                    const h = (bytes[20]<<24)|(bytes[21]<<16)|(bytes[22]<<8)|bytes[23];
+                    return JSON.stringify({ sig: sig, w: w, h: h, stable: a === b, len: a.length });
+                })()"#,
+            )
+            .unwrap();
+        let s = result.as_str().expect("result should be a string");
+        let v: serde_json::Value = serde_json::from_str(s).expect("should be JSON");
+        assert_eq!(v["sig"], serde_json::json!(true), "PNG magic bytes missing");
+        assert_eq!(v["w"], serde_json::json!(220), "IHDR width mismatch");
+        assert_eq!(v["h"], serde_json::json!(30), "IHDR height mismatch");
+        assert_eq!(v["stable"], serde_json::json!(true), "toDataURL not stable");
+        assert!(v["len"].as_i64().unwrap_or(0) > 200, "data URL too short");
+    }
+
+    #[test]
     fn test_fontface_constructor_and_document_fonts() {
         let mut rt = setup_runtime("<html><body></body></html>");
         assert_eq!(
