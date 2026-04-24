@@ -923,6 +923,30 @@ mod tests {
     }
 
     #[test]
+    fn test_bootstrap_internals_not_on_window() {
+        // Top-level function declarations and var are hoisted onto globalThis in V8.
+        // Any of these names appearing in Object.keys(window) or via the 'in' operator
+        // lets page scripts detect the Obscura runtime.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let leaked = rt
+            .evaluate(
+                r#"(function() {
+                var names = ['_markNative','_fpRand','_fpNoise','_fpCache',
+                             '_getFp','_fp','_wrap','_wrapEl','_resolveUrl','_registerIframe',
+                             '_fontSizePx','_charAdvance','_Deno'];
+                return names.filter(function(k) { return k in globalThis; });
+            })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            leaked,
+            serde_json::json!([]),
+            "bootstrap internals must not be reachable via globalThis: {:?}",
+            leaked
+        );
+    }
+
+    #[test]
     fn test_deno_not_on_global() {
         // After bootstrap, page scripts must not be able to detect Deno runtime.
         let mut rt = setup_runtime("<html><body></body></html>");

@@ -38,7 +38,7 @@ Function.prototype.toString = function() {
   }
   return _origToString.call(this);
 };
-function _markNative(fn) { if (typeof fn === 'function') _nativeFns.add(fn); return fn; }
+const _markNative = function(fn) { if (typeof fn === 'function') _nativeFns.add(fn); return fn; };
 _nativeFns.add(Function.prototype.toString);
 
 [Error, TypeError, ReferenceError, SyntaxError, RangeError, URIError, EvalError].forEach(E => {
@@ -62,18 +62,18 @@ if (_origStackDesc && _origStackDesc.get) {
 }
 
 let _fpSeed = 0;
-function _fpRand(salt) {
+const _fpRand = function(salt) {
   let h = (_fpSeed ^ (salt || 0)) | 0;
   h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
   h = Math.imul(h ^ (h >>> 13), 0x45d9f3b);
   return ((h ^ (h >>> 16)) >>> 0) / 0xFFFFFFFF;
-}
-function _fpNoise(x, y, channel) {
+};
+const _fpNoise = function(x, y, channel) {
   return (_fpRand(x * 7919 + y * 6271 + channel * 8923) - 0.5) * 4;
-}
+};
 
-var _fpCache = null;
-function _getFp() {
+let _fpCache = null;
+const _getFp = function() {
   if (_fpCache) return _fpCache;
   const gpuPool = [
     'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
@@ -116,7 +116,7 @@ function _getFp() {
   };
   return _fpCache;
 }
-function _fp(key) { return _getFp()[key]; }
+const _fp = function(key) { return _getFp()[key]; };
 globalThis._eventRegistry = globalThis._eventRegistry || {};
 globalThis._formValues = globalThis._formValues || {};
 globalThis._formChecked = globalThis._formChecked || {};
