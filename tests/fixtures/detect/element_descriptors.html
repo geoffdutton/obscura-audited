@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<script>
+  // Golden list sourced from element_prototype.json (Chrome 145 Linux).
+  // To regenerate: open Chrome 145 Linux DevTools console and run:
+  //   JSON.stringify(Object.getOwnPropertyNames(Element.prototype).filter(n =>
+  //     Object.getOwnPropertyDescriptor(Element.prototype, n)?.get))
+  // then merge with HTMLElement.prototype names that Obscura surfaces on Element.
+  var EXPECTED = ["innerHTML","outerHTML","classList","attributes","children","clientWidth","clientHeight","clientLeft","clientTop","offsetWidth","offsetHeight","offsetTop","offsetLeft","offsetParent","scrollTop","scrollLeft","scrollWidth","scrollHeight","dataset","id","className","tagName","namespaceURI","localName","prefix","slot","part","shadowRoot","assignedSlot","role","firstElementChild","lastElementChild","childElementCount","nextElementSibling","previousElementSibling","innerText","style"];
+  var missing = EXPECTED.filter(function(n) {
+    return !Object.getOwnPropertyDescriptor(Element.prototype, n);
+  });
+  document.title = JSON.stringify({ missing: missing });
+</script>
+</body></html>

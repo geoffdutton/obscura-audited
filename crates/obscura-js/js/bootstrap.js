@@ -763,18 +763,45 @@ class Element extends Node {
 // common DOM accessor. ES class-body getters land on the prototype with
 // enumerable:false, but real browsers make these enumerable accessors, and
 // inherited accessors like textContent (declared on Node) only show via
-// getOwnPropertyDescriptor on the class that owns them. Re-publish the 15 names
-// as own accessor descriptors on Element.prototype with the browser shape.
+// getOwnPropertyDescriptor on the class that owns them. Re-publish all names
+// from the golden list (tests/fixtures/detect/element_prototype.json) as own
+// accessor descriptors on Element.prototype with the browser shape.
+// Properties with no class-level backing get a type-correct default so that
+// Object.getOwnPropertyDescriptor returns a real descriptor (not undefined).
+const _elementFallbacks = {
+  attributes:   null,
+  shadowRoot:   null,
+  assignedSlot: null,
+  offsetParent: null,
+  part:         null,
+  prefix:       null,
+  slot:         '',
+  role:         '',
+  clientLeft:   0,
+  clientTop:    0,
+};
 for (const _name of [
   'innerHTML','outerHTML','innerText','textContent','className','id',
-  'tagName','style','children','childElementCount',
-  'clientWidth','clientHeight','offsetWidth','offsetHeight','dataset',
+  'tagName','localName','namespaceURI','prefix',
+  'classList','attributes','shadowRoot','part','slot','assignedSlot','role',
+  'style','dataset',
+  'children','firstElementChild','lastElementChild','childElementCount',
+  'nextElementSibling','previousElementSibling',
+  'clientWidth','clientHeight','clientLeft','clientTop',
+  'offsetWidth','offsetHeight','offsetTop','offsetLeft','offsetParent',
+  'scrollTop','scrollLeft','scrollWidth','scrollHeight',
 ]) {
   const _d = Object.getOwnPropertyDescriptor(Element.prototype, _name)
           ?? Object.getOwnPropertyDescriptor(Node.prototype, _name);
   if (_d && (_d.get || _d.set)) {
     Object.defineProperty(Element.prototype, _name, {
       get: _d.get, set: _d.set, enumerable: true, configurable: true,
+    });
+  } else if (Object.prototype.hasOwnProperty.call(_elementFallbacks, _name)) {
+    const _v = _elementFallbacks[_name];
+    Object.defineProperty(Element.prototype, _name, {
+      get() { return _v; }, set(_) {},
+      enumerable: true, configurable: true,
     });
   }
 }

@@ -1,0 +1,12 @@
+[
+  "innerHTML", "outerHTML", "classList", "attributes", "children",
+  "clientWidth", "clientHeight", "clientLeft", "clientTop",
+  "offsetWidth", "offsetHeight", "offsetTop", "offsetLeft", "offsetParent",
+  "scrollTop", "scrollLeft", "scrollWidth", "scrollHeight",
+  "dataset", "id", "className", "tagName", "namespaceURI",
+  "localName", "prefix", "slot", "part", "shadowRoot",
+  "assignedSlot", "role",
+  "firstElementChild", "lastElementChild", "childElementCount",
+  "nextElementSibling", "previousElementSibling",
+  "innerText", "style"
+]
