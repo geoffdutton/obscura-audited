@@ -1,0 +1,55 @@
+name: no-session-links
+
+on:
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan PR for session links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Scan PR metadata and commit messages
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          pattern='claude\.ai/(chat|share|code)/|(^|[^A-Za-z0-9_])session_[A-Za-z0-9_-]{8,}|(^|[^A-Za-z0-9_])gsd_[A-Za-z0-9_-]{8,}'
+
+          fail=0
+
+          check() {
+            local label="$1" text="$2"
+            if printf '%s' "$text" | grep -En "$pattern" >/dev/null; then
+              echo "::error::${label} contains a forbidden session-link pattern:"
+              printf '%s' "$text" | grep -En "$pattern" | sed 's/^/  /'
+              fail=1
+            fi
+          }
+
+          check "PR title" "$PR_TITLE"
+          check "PR body" "$PR_BODY"
+
+          while IFS= read -r sha; do
+            [ -z "$sha" ] && continue
+            msg=$(git log -1 --format=%B "$sha")
+            check "commit ${sha}" "$msg"
+          done < <(git log --format=%H "${BASE_SHA}..${HEAD_SHA}")
+
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "Policy: CLAUDE.md 'Commit / PR hygiene' forbids claude.ai/chat,"
+            echo "claude.ai/share, claude.ai/code, session_*, and gsd_* in"
+            echo "commits, PRs, issue comments, and review replies."
+            exit 1
+          fi

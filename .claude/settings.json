@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|mcp__github__(add_comment_to_pending_review|add_issue_comment|add_reply_to_pull_request_comment|create_pull_request|update_pull_request|pull_request_review_write|issue_write|sub_issue_write|create_or_update_file|push_files))$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/no-session-links.py\""
+          }
+        ]
+      }
+    ]
+  }
+}
