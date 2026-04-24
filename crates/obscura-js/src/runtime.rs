@@ -2238,4 +2238,35 @@ mod tests {
         let n = count.as_f64().unwrap() as i32;
         assert!(n >= 2, "expected ≥2 client rects, got {}", n);
     }
+
+    #[test]
+    fn test_iframe_content_document_is_object() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let ty = rt
+            .evaluate(
+                r#"(function() {
+                    const f = document.createElement('iframe');
+                    document.body.appendChild(f);
+                    return typeof f.contentDocument;
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(ty, serde_json::json!("object"));
+    }
+
+    #[test]
+    fn test_iframe_content_window_is_object_after_content_document() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let ty = rt
+            .evaluate(
+                r#"(function() {
+                    const f = document.createElement('iframe');
+                    document.body.appendChild(f);
+                    f.contentDocument; // force lazy init
+                    return typeof f.contentWindow;
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(ty, serde_json::json!("object"));
+    }
 }
