@@ -2117,22 +2117,32 @@ globalThis.__ariaQuerySelector = function(root, selector) { return null; };
 globalThis.__ariaQuerySelectorAll = async function*(root, selector) { /* yields nothing */ };
 
 class TextMetrics {
-  constructor(p) {
-    this.width = p.width;
-    this.actualBoundingBoxLeft = p.actualBoundingBoxLeft;
-    this.actualBoundingBoxRight = p.actualBoundingBoxRight;
-    this.actualBoundingBoxAscent = p.actualBoundingBoxAscent;
-    this.actualBoundingBoxDescent = p.actualBoundingBoxDescent;
-    this.fontBoundingBoxAscent = p.fontBoundingBoxAscent;
-    this.fontBoundingBoxDescent = p.fontBoundingBoxDescent;
-    this.emHeightAscent = p.emHeightAscent;
-    this.emHeightDescent = p.emHeightDescent;
-    this.hangingBaseline = p.hangingBaseline;
-    this.alphabeticBaseline = p.alphabeticBaseline;
-    this.ideographicBaseline = p.ideographicBaseline;
+  constructor() {
+    throw new TypeError('Illegal constructor');
   }
 }
 globalThis.TextMetrics = TextMetrics;
+
+function _fontSizePx(font) {
+  const fm = /(\d+(?:\.\d+)?)(px|pt|em|rem)/.exec(font || '');
+  if (!fm) return 10;
+  const n = parseFloat(fm[1]);
+  return fm[2] === 'pt' ? n * 4 / 3 : (fm[2] === 'em' || fm[2] === 'rem') ? n * 16 : n;
+}
+
+function _charAdvance(code, fontSize) {
+  let base;
+  if (code === 32) base = 0.2783203125;
+  else if (code === 46 || code === 44 || code === 39) base = 0.25;
+  else if (code === 73 || code === 105 || code === 108 || code === 106) base = 0.2246 + _fpRand(code) * 0.04;
+  else if (code >= 48 && code <= 57) base = 0.5546875;
+  else if (code >= 65 && code <= 90) base = 0.62 + _fpRand(code) * 0.13;
+  else if (code >= 97 && code <= 122) base = 0.48 + _fpRand(code) * 0.11;
+  else if (code < 128) base = 0.3 + _fpRand(code) * 0.3;
+  else base = 0.55 + _fpRand(code) * 0.3;
+  const jitter = (_fpRand(code * 31 + ((fontSize * 100) | 0)) - 0.5) * 0.008;
+  return (base + jitter) * fontSize;
+}
 
 class _Canvas2D {
   constructor(canvas) {
@@ -2209,12 +2219,13 @@ class _Canvas2D {
   }
   fillText(text, x, y) {
     const [r,g,b,a] = this._parseColor(this.fillStyle);
-    const fontSize = parseInt(this.font) || 10;
+    const fontSize = _fontSizePx(this.font);
     const scale = Math.max(1, Math.round(fontSize / 10));
     const str = String(text);
-    let cx = Math.round(x);
+    let cx = x;
     for (let i = 0; i < str.length; i++) {
       const code = str.charCodeAt(i);
+      const drawX = Math.round(cx);
       for (let row = 0; row < 7; row++) {
         for (let col = 0; col < 5; col++) {
           const on = ((_fpRand(code * 100 + row * 10 + col) > 0.45) &&
@@ -2223,40 +2234,25 @@ class _Canvas2D {
           if (on) {
             for (let sy = 0; sy < scale; sy++) {
               for (let sx = 0; sx < scale; sx++) {
-                this._setPixel(cx + col*scale + sx, Math.round(y) - 7*scale + row*scale + sy, r, g, b, a);
+                this._setPixel(drawX + col*scale + sx, Math.round(y) - 7*scale + row*scale + sy, r, g, b, a);
               }
             }
           }
         }
       }
-      cx += 6 * scale;
+      cx += _charAdvance(code, fontSize);
     }
   }
   strokeText(text, x, y) { this.fillText(text, x, y); }
   measureText(t) {
     const str = String(t);
-    let fontSize = 10;
-    const fm = /(\d+(?:\.\d+)?)(px|pt|em|rem)/.exec(this.font || '');
-    if (fm) {
-      const n = parseFloat(fm[1]);
-      fontSize = fm[2] === 'pt' ? n * 4 / 3 : (fm[2] === 'em' || fm[2] === 'rem') ? n * 16 : n;
-    }
+    const fontSize = _fontSizePx(this.font);
     let width = 0;
     let maxAscent = 0;
     let maxDescent = 0;
     for (let i = 0; i < str.length; i++) {
       const code = str.charCodeAt(i);
-      let base;
-      if (code === 32) base = 0.2783203125;
-      else if (code === 46 || code === 44 || code === 39) base = 0.25;
-      else if (code === 73 || code === 105 || code === 108 || code === 106) base = 0.2246 + _fpRand(code) * 0.04;
-      else if (code >= 48 && code <= 57) base = 0.5546875;
-      else if (code >= 65 && code <= 90) base = 0.62 + _fpRand(code) * 0.13;
-      else if (code >= 97 && code <= 122) base = 0.48 + _fpRand(code) * 0.11;
-      else if (code < 128) base = 0.3 + _fpRand(code) * 0.3;
-      else base = 0.55 + _fpRand(code) * 0.3;
-      const jitter = (_fpRand(code * 31 + ((fontSize * 100) | 0)) - 0.5) * 0.008;
-      width += (base + jitter) * fontSize;
+      width += _charAdvance(code, fontSize);
       const isDescender = code === 103 || code === 106 || code === 112 || code === 113 || code === 121;
       maxDescent = Math.max(maxDescent, fontSize * (isDescender ? 0.21875 : 0.039));
       const isAscender = (code >= 65 && code <= 90) || (code >= 48 && code <= 57) ||
@@ -2265,20 +2261,20 @@ class _Canvas2D {
       maxAscent = Math.max(maxAscent, fontSize * (isAscender ? 0.73583984375 : 0.5283203125));
     }
     if (str.length === 0) { maxAscent = 0; maxDescent = 0; }
-    return new TextMetrics({
-      width,
-      actualBoundingBoxLeft: str.length ? fontSize * 0.0556640625 : 0,
-      actualBoundingBoxRight: str.length ? width + fontSize * 0.019 : 0,
-      actualBoundingBoxAscent: maxAscent,
-      actualBoundingBoxDescent: maxDescent,
-      fontBoundingBoxAscent: fontSize * 0.927734375,
-      fontBoundingBoxDescent: fontSize * 0.244140625,
-      emHeightAscent: fontSize * 0.80078125,
-      emHeightDescent: fontSize * 0.19921875,
-      hangingBaseline: fontSize * 0.7421875,
-      alphabeticBaseline: 0,
-      ideographicBaseline: -fontSize * 0.2119140625,
-    });
+    const m = Object.create(TextMetrics.prototype);
+    m.width = width;
+    m.actualBoundingBoxLeft = str.length ? fontSize * 0.0556640625 : 0;
+    m.actualBoundingBoxRight = str.length ? width + fontSize * 0.019 : 0;
+    m.actualBoundingBoxAscent = maxAscent;
+    m.actualBoundingBoxDescent = maxDescent;
+    m.fontBoundingBoxAscent = fontSize * 0.927734375;
+    m.fontBoundingBoxDescent = fontSize * 0.244140625;
+    m.emHeightAscent = fontSize * 0.80078125;
+    m.emHeightDescent = fontSize * 0.19921875;
+    m.hangingBaseline = fontSize * 0.7421875;
+    m.alphabeticBaseline = 0;
+    m.ideographicBaseline = -fontSize * 0.2119140625;
+    return m;
   }
   getImageData(x, y, w, h) {
     x=Math.round(x); y=Math.round(y); w=Math.round(w); h=Math.round(h);

@@ -989,6 +989,44 @@ mod tests {
         assert_eq!(result, serde_json::json!(true));
     }
 
+    #[test]
+    fn test_canvas_textmetrics_illegal_constructor() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt
+            .evaluate(
+                r#"(() => {
+                try { new TextMetrics(); return 'constructed'; }
+                catch (e) { return e instanceof TypeError ? 'TypeError' : 'other:' + e.message; }
+            })()"#,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!("TypeError"));
+    }
+
+    #[test]
+    fn test_canvas_fill_and_measure_widths_match() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let matches = rt
+            .evaluate(
+                r#"(() => {
+                const c = document.createElement('canvas');
+                c.width = 400; c.height = 50;
+                const ctx = c.getContext('2d');
+                ctx.font = '16px sans-serif';
+                // Wide string 'W' repeated should measure wider than narrow 'i' repeated.
+                const wide = ctx.measureText('WWWWWWWW').width;
+                const narrow = ctx.measureText('iiiiiiii').width;
+                return wide > narrow * 1.5;
+            })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            matches,
+            serde_json::json!(true),
+            "proportional advance should make 'W' much wider than 'i'"
+        );
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn test_call_function_on_no_args() {
         let mut rt = setup_runtime("<html><head><title>Test</title></head><body></body></html>");
