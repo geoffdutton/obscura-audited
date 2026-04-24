@@ -52,23 +52,29 @@ cargo fmt --all && cargo clippy --all-targets --all-features -- -D warnings  # p
 `--features stealth` pulls in `wreq` → `boring-sys2`, whose `prefix-symbols`
 feature is broken on macOS/Windows: the C-side BoringSSL rename is skipped
 but the Rust bindgen rename is applied, so every TLS symbol is unresolved
-at link time. Run the stealth build and `verify-stealth.sh` in a Linux
-container instead:
+at link time. Run the stealth build and `verify-stealth.sh` via the
+`obscura-stealth` Docker image (built from `scripts/Dockerfile.stealth`,
+which bakes in `cmake` + `clang` + `libclang-dev` + `pkg-config` — raw
+`rust:1.95` is missing all four and will fail with `is 'cmake' not
+installed?` then `Unable to find libclang`):
 
 ```bash
-# One-shot stealth build
+# One-time: build the image. Rerun only if scripts/Dockerfile.stealth changes.
+docker build -t obscura-stealth -f scripts/Dockerfile.stealth .
+
+# Stealth build
 docker run --rm \
-  -v "$PWD":/src -w /src \
+  -v "$PWD":/src \
   -v obscura-cargo-registry:/usr/local/cargo/registry \
   -v obscura-linux-target:/src/target \
-  rust:1.95 cargo build --release --features stealth
+  obscura-stealth cargo build --release --features stealth
 
 # Bot-detection verification (same image)
 docker run --rm \
-  -v "$PWD":/src -w /src \
+  -v "$PWD":/src \
   -v obscura-cargo-registry:/usr/local/cargo/registry \
   -v obscura-linux-target:/src/target \
-  rust:1.95 bash scripts/verify-stealth.sh
+  obscura-stealth bash scripts/verify-stealth.sh
 ```
 
 The named volumes (`obscura-cargo-registry`, `obscura-linux-target`) persist

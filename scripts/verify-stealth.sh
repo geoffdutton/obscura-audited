@@ -43,11 +43,16 @@ verify-stealth.sh requires Linux (boring-sys2 prefix-symbols is macOS/Windows-br
 
 Run via Docker:
 
+  # One-time: build the image (bakes in cmake + clang + libclang-dev + pkg-config
+  # that boring-sys2 needs). Rerun only if scripts/Dockerfile.stealth changes.
+  docker build -t obscura-stealth -f scripts/Dockerfile.stealth .
+
+  # Run the verification
   docker run --rm \\
-    -v "\$PWD":/src -w /src \\
+    -v "\$PWD":/src \\
     -v obscura-cargo-registry:/usr/local/cargo/registry \\
     -v obscura-linux-target:/src/target \\
-    rust:1.95 bash scripts/verify-stealth.sh ${ORIG_ARGS[*]:-}
+    obscura-stealth bash scripts/verify-stealth.sh ${ORIG_ARGS[*]:-}
 
 The named volumes cache cargo's registry and the Linux target dir across
 runs (the Linux target stays isolated from your macOS ./target). First run

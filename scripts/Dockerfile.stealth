@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1.7
+# Build image for the `stealth` feature.
+#
+# `rust:1.95` alone is missing native deps that `boring-sys2` (pulled in
+# transitively via `wreq` under --features stealth) needs:
+#   - cmake          — builds BoringSSL from the vendored C sources
+#   - clang / libclang-dev — bindgen generates Rust bindings from the headers
+#   - pkg-config     — dependency discovery for the above
+#
+# Without these the build fails with "is `cmake` not installed?" and
+# "Unable to find libclang" respectively. Baking them into the image means
+# the apt step only runs at image-build time instead of every `docker run`.
+#
+# Usage:
+#   docker build -t obscura-stealth -f scripts/Dockerfile.stealth .
+#
+#   # Build:
+#   docker run --rm \
+#     -v "$PWD":/src \
+#     -v obscura-cargo-registry:/usr/local/cargo/registry \
+#     -v obscura-linux-target:/src/target \
+#     obscura-stealth cargo build --release --features stealth
+#
+#   # Verify:
+#   docker run --rm \
+#     -v "$PWD":/src \
+#     -v obscura-cargo-registry:/usr/local/cargo/registry \
+#     -v obscura-linux-target:/src/target \
+#     obscura-stealth bash scripts/verify-stealth.sh
+
+FROM rust:1.95
+
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      cmake \
+      clang \
+      libclang-dev \
+      pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
