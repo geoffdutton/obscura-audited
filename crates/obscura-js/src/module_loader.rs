@@ -23,7 +23,7 @@ impl ObscuraModuleLoader {
 }
 
 fn io_err(msg: String) -> ModuleLoaderError {
-    std::io::Error::new(std::io::ErrorKind::Other, msg).into()
+    std::io::Error::other(msg).into()
 }
 
 impl ModuleLoader for ObscuraModuleLoader {
@@ -59,15 +59,13 @@ impl ModuleLoader for ObscuraModuleLoader {
         // follow-on load triggered by such a module). The page URL is the
         // initiator origin for PNA; if it's unparseable, fall back to a
         // synthetic public URL so private targets remain blocked.
-        let initiator = deno_core::ModuleSpecifier::parse(&self.base_url)
-            .unwrap_or_else(|_| {
-                deno_core::ModuleSpecifier::parse("https://unknown.invalid").unwrap()
-            });
+        let initiator = deno_core::ModuleSpecifier::parse(&self.base_url).unwrap_or_else(|_| {
+            deno_core::ModuleSpecifier::parse("https://unknown.invalid").unwrap()
+        });
 
         ModuleLoadResponse::Async(Pin::from(Box::new(async move {
-            validate_pna(&parsed, RequestInitiator::Page(&initiator)).map_err(|e| {
-                io_err(format!("Refused to load module {}: {}", url, e))
-            })?;
+            validate_pna(&parsed, RequestInitiator::Page(&initiator))
+                .map_err(|e| io_err(format!("Refused to load module {}: {}", url, e)))?;
 
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -91,9 +89,10 @@ impl ModuleLoader for ObscuraModuleLoader {
                 )));
             }
 
-            let code = resp.text().await.map_err(|e| {
-                io_err(format!("Failed to read module body {}: {}", url, e))
-            })?;
+            let code = resp
+                .text()
+                .await
+                .map_err(|e| io_err(format!("Failed to read module body {}: {}", url, e)))?;
 
             let specifier = ModuleSpecifier::parse(&url)
                 .map_err(|e| io_err(format!("Invalid module URL {}: {}", url, e)))?;

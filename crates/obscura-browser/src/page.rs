@@ -79,13 +79,21 @@ impl Page {
             return false;
         }
         for pattern in &self.intercept_block_patterns {
-            if pattern == "*" { return true; }
+            if pattern == "*" {
+                return true;
+            }
             if pattern.starts_with('*') && pattern.ends_with('*') {
-                if url.contains(&pattern[1..pattern.len()-1]) { return true; }
-            } else if pattern.starts_with('*') {
-                if url.ends_with(&pattern[1..]) { return true; }
-            } else if pattern.ends_with('*') {
-                if url.starts_with(&pattern[..pattern.len()-1]) { return true; }
+                if url.contains(&pattern[1..pattern.len() - 1]) {
+                    return true;
+                }
+            } else if let Some(stripped) = pattern.strip_prefix('*') {
+                if url.ends_with(stripped) {
+                    return true;
+                }
+            } else if let Some(stripped) = pattern.strip_suffix('*') {
+                if url.starts_with(stripped) {
+                    return true;
+                }
             } else if url.contains(pattern) {
                 return true;
             }
@@ -106,20 +114,23 @@ impl Page {
             let title = self.title.clone();
             let dom = self.dom.take();
 
-            let js = self.js.as_mut().unwrap();
-            js.set_url(&url_str);
-            js.set_title(&title);
+            if let Some(js) = self.js.as_mut() {
+                js.set_url(&url_str);
+                js.set_title(&title);
 
-            if let Some(d) = dom {
-                js.set_dom(d);
+                if let Some(d) = dom {
+                    js.set_dom(d);
+                }
+
+                let _ = js.execute_script(
+                    "<reset>",
+                    "_cache.clear(); globalThis.__obscura_objects = {}; globalThis.__obscura_oid = 0; \
+                     _iframeRegistry.length = 0; globalThis.length = 0; \
+                     globalThis._formValues = {}; globalThis._formChecked = {}; \
+                     globalThis._eventRegistry = {}; \
+                     globalThis.document = new Document(+_dom('document_node_id'));",
+                );
             }
-
-            let _ = js.execute_script("<reset>",
-                "_cache.clear(); globalThis.__obscura_objects = {}; globalThis.__obscura_oid = 0; \
-                 _iframeRegistry.length = 0; globalThis.length = 0; \
-                 globalThis._formValues = {}; globalThis._formChecked = {}; \
-                 globalThis._eventRegistry = {}; \
-                 globalThis.document = new Document(+_dom('document_node_id'));");
 
             return;
         }
@@ -154,7 +165,10 @@ impl Page {
     }
 
     async fn execute_scripts(&mut self) {
-        tracing::info!("execute_scripts called, js runtime exists: {}", self.js.is_some());
+        tracing::info!(
+            "execute_scripts called, js runtime exists: {}",
+            self.js.is_some()
+        );
 
         #[derive(Debug)]
         struct ScriptInfo {
@@ -166,8 +180,8 @@ impl Page {
         }
 
         let all_scripts = match &self.js {
-            Some(js) => {
-                js.with_dom(|dom| {
+            Some(js) => js
+                .with_dom(|dom| {
                     let script_ids = dom.query_selector_all("script").unwrap_or_default();
                     let mut scripts = Vec::new();
 
@@ -205,8 +219,8 @@ impl Page {
                         }
                     }
                     scripts
-                }).unwrap_or_default()
-            }
+                })
+                .unwrap_or_default(),
             None => return,
         };
 
@@ -232,10 +246,16 @@ impl Page {
 
         let scripts = regular;
 
-        tracing::info!("Found {} regular + {} deferred + {} async scripts", scripts.len(), deferred.len(), async_scripts.len());
-        let all_to_execute: Vec<ScriptInfo> = scripts.into_iter()
-            .chain(deferred.into_iter())
-            .chain(async_scripts.into_iter())
+        tracing::info!(
+            "Found {} regular + {} deferred + {} async scripts",
+            scripts.len(),
+            deferred.len(),
+            async_scripts.len()
+        );
+        let all_to_execute: Vec<ScriptInfo> = scripts
+            .into_iter()
+            .chain(deferred)
+            .chain(async_scripts)
             .collect();
 
         let mut resolved: Vec<(usize, String)> = Vec::new();
@@ -243,10 +263,13 @@ impl Page {
 
         for (i, script) in all_to_execute.iter().enumerate() {
             if let Some(src_url) = &script.src {
-                let full_url = if src_url.starts_with("http://") || src_url.starts_with("https://") {
+                let full_url = if src_url.starts_with("http://") || src_url.starts_with("https://")
+                {
                     src_url.clone()
                 } else if let Some(base) = &self.url {
-                    base.join(src_url).map(|u| u.to_string()).unwrap_or_else(|_| src_url.clone())
+                    base.join(src_url)
+                        .map(|u| u.to_string())
+                        .unwrap_or_else(|_| src_url.clone())
                 } else {
                     src_url.clone()
                 };
@@ -262,42 +285,52 @@ impl Page {
 
         let client = self.http_client.clone();
         let page_url = self.url.clone();
-        let fetch_futures: Vec<_> = fetch_tasks.iter().map(|(idx, url)| {
-            let client = client.clone();
-            let url = url.clone();
-            let idx = *idx;
-            let page_url = page_url.clone();
-            async move {
-                let parsed = Url::parse(&url).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
-                let result = match page_url.as_ref() {
-                    Some(origin) => client.fetch_subresource(&parsed, origin).await,
-                    None => client.fetch(&parsed).await,
-                };
-                match result {
-                    Ok(resp) => Some((idx, url, resp)),
-                    Err(e) => {
-                        tracing::warn!("Failed to fetch script {}: {}", url, e);
-                        None
+        let fetch_futures: Vec<_> = fetch_tasks
+            .iter()
+            .map(|(idx, url)| {
+                let client = client.clone();
+                let url = url.clone();
+                let idx = *idx;
+                let page_url = page_url.clone();
+                async move {
+                    let parsed =
+                        Url::parse(&url).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
+                    let result = match page_url.as_ref() {
+                        Some(origin) => client.fetch_subresource(&parsed, origin).await,
+                        None => client.fetch(&parsed).await,
+                    };
+                    match result {
+                        Ok(resp) => Some((idx, url, resp)),
+                        Err(e) => {
+                            tracing::warn!("Failed to fetch script {}: {}", url, e);
+                            None
+                        }
                     }
                 }
-            }
-        }).collect();
+            })
+            .collect();
 
         let fetch_results = futures::future::join_all(fetch_futures).await;
 
-        let mut fetched: std::collections::HashMap<usize, (String, String, obscura_net::Response)> = std::collections::HashMap::new();
-        for result in fetch_results {
-            if let Some((idx, url, resp)) = result {
-                let code = String::from_utf8_lossy(&resp.body).to_string();
-                fetched.insert(idx, (url, code, resp));
-            }
+        let mut fetched: std::collections::HashMap<usize, (String, String, obscura_net::Response)> =
+            std::collections::HashMap::new();
+        for (idx, url, resp) in fetch_results.into_iter().flatten() {
+            let code = String::from_utf8_lossy(&resp.body).to_string();
+            fetched.insert(idx, (url, code, resp));
         }
 
         for (i, script) in all_to_execute.iter().enumerate() {
             if script.src.is_some() {
                 if let Some((url, code, resp)) = fetched.remove(&i) {
                     tracing::info!("Executing script ({} bytes): {}", code.len(), url);
-                    self.record_network_event(&url, "GET", "Script", resp.status, &resp.headers, resp.body.len());
+                    self.record_network_event(
+                        &url,
+                        "GET",
+                        "Script",
+                        resp.status,
+                        &resp.headers,
+                        resp.body.len(),
+                    );
                     if let Some(js) = &mut self.js {
                         if let Err(e) = js.execute_script_guarded(&url, &code) {
                             tracing::warn!("Script error ({}): {}", url, e);
@@ -318,7 +351,9 @@ impl Page {
                 let full_url = if src.starts_with("http://") || src.starts_with("https://") {
                     src.clone()
                 } else if let Some(base) = &self.url {
-                    base.join(src).map(|u| u.to_string()).unwrap_or_else(|_| src.clone())
+                    base.join(src)
+                        .map(|u| u.to_string())
+                        .unwrap_or_else(|_| src.clone())
                 } else {
                     src.clone()
                 };
@@ -328,7 +363,14 @@ impl Page {
                     match js.load_module(&full_url).await {
                         Ok(()) => {
                             tracing::info!("ES module loaded: {}", full_url);
-                            self.record_network_event(&full_url, "GET", "Script", 200, &std::collections::HashMap::new(), 0);
+                            self.record_network_event(
+                                &full_url,
+                                "GET",
+                                "Script",
+                                200,
+                                &std::collections::HashMap::new(),
+                                0,
+                            );
                         }
                         Err(e) => {
                             tracing::warn!("ES module error ({}): {}", full_url, e);
@@ -359,7 +401,8 @@ impl Page {
                 let result = tokio::time::timeout(
                     tokio::time::Duration::from_millis(10),
                     js.run_event_loop(),
-                ).await;
+                )
+                .await;
 
                 match result {
                     Ok(Ok(())) => {
@@ -387,7 +430,8 @@ impl Page {
     }
 
     pub async fn navigate(&mut self, url_str: &str) -> Result<(), PageError> {
-        self.navigate_with_wait(url_str, crate::lifecycle::WaitUntil::Load).await
+        self.navigate_with_wait(url_str, crate::lifecycle::WaitUntil::Load)
+            .await
     }
 
     pub async fn navigate_with_wait(
@@ -395,7 +439,8 @@ impl Page {
         url_str: &str,
         wait_until: crate::lifecycle::WaitUntil,
     ) -> Result<(), PageError> {
-        self.navigate_with_wait_post(url_str, wait_until, "GET", "").await
+        self.navigate_with_wait_post(url_str, wait_until, "GET", "")
+            .await
     }
 
     pub async fn navigate_with_wait_post(
@@ -409,9 +454,15 @@ impl Page {
         let mut current_method = method.to_string();
         let mut current_body = body.to_string();
         for _chain in 0..10 {
-            self.navigate_single(&current_url, wait_until, &current_method, &current_body).await?;
+            self.navigate_single(&current_url, wait_until, &current_method, &current_body)
+                .await?;
             if let Some((next_url, next_method, next_body)) = self.take_pending_navigation() {
-                tracing::info!("JS-triggered navigation chain: {} {} -> {}", current_method, current_url, next_url);
+                tracing::info!(
+                    "JS-triggered navigation chain: {} {} -> {}",
+                    current_method,
+                    current_url,
+                    next_url
+                );
                 current_url = next_url;
                 current_method = next_method;
                 current_body = next_body;
@@ -467,7 +518,8 @@ impl Page {
             self.http_client.post_form(&url, body).await
         } else {
             self.do_fetch(&url).await
-        }.map_err(|e| {
+        }
+        .map_err(|e| {
             self.lifecycle = LifecycleState::Failed;
             PageError::NetworkError(e.to_string())
         })?;
@@ -514,7 +566,9 @@ impl Page {
             let full_url = if href.starts_with("http://") || href.starts_with("https://") {
                 href.clone()
             } else if let Some(base) = &self.url {
-                base.join(href).map(|u| u.to_string()).unwrap_or_else(|_| href.clone())
+                base.join(href)
+                    .map(|u| u.to_string())
+                    .unwrap_or_else(|_| href.clone())
             } else {
                 href.clone()
             };
@@ -527,34 +581,43 @@ impl Page {
 
         let client = self.http_client.clone();
         let page_url = self.url.clone();
-        let css_futures: Vec<_> = css_fetch_urls.iter().map(|full_url| {
-            let client = client.clone();
-            let url_str = full_url.clone();
-            let page_url = page_url.clone();
-            async move {
-                let parsed = Url::parse(&url_str).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
-                let result = match page_url.as_ref() {
-                    Some(origin) => client.fetch_subresource(&parsed, origin).await,
-                    None => client.fetch(&parsed).await,
-                };
-                match result {
-                    Ok(resp) => Some((url_str, resp)),
-                    Err(e) => {
-                        tracing::debug!("Failed to fetch stylesheet {}: {}", url_str, e);
-                        None
+        let css_futures: Vec<_> = css_fetch_urls
+            .iter()
+            .map(|full_url| {
+                let client = client.clone();
+                let url_str = full_url.clone();
+                let page_url = page_url.clone();
+                async move {
+                    let parsed =
+                        Url::parse(&url_str).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
+                    let result = match page_url.as_ref() {
+                        Some(origin) => client.fetch_subresource(&parsed, origin).await,
+                        None => client.fetch(&parsed).await,
+                    };
+                    match result {
+                        Ok(resp) => Some((url_str, resp)),
+                        Err(e) => {
+                            tracing::debug!("Failed to fetch stylesheet {}: {}", url_str, e);
+                            None
+                        }
                     }
                 }
-            }
-        }).collect();
+            })
+            .collect();
 
         let css_results = futures::future::join_all(css_futures).await;
         let mut css_sources = Vec::new();
-        for result in css_results {
-            if let Some((url_str, resp)) = result {
-                let css = String::from_utf8_lossy(&resp.body).to_string();
-                self.record_network_event(&url_str, "GET", "Stylesheet", resp.status, &resp.headers, resp.body.len());
-                css_sources.push(css);
-            }
+        for (url_str, resp) in css_results.into_iter().flatten() {
+            let css = String::from_utf8_lossy(&resp.body).to_string();
+            self.record_network_event(
+                &url_str,
+                "GET",
+                "Stylesheet",
+                resp.status,
+                &resp.headers,
+                resp.body.len(),
+            );
+            css_sources.push(css);
         }
 
         self.dom = Some(dom);
@@ -616,7 +679,9 @@ impl Page {
                     if idle_since.is_none() {
                         idle_since = Some(now);
                     }
-                    if now.duration_since(idle_since.unwrap()) >= tokio::time::Duration::from_millis(500) {
+                    if now.duration_since(idle_since.unwrap())
+                        >= tokio::time::Duration::from_millis(500)
+                    {
                         break;
                     }
                 } else {
@@ -624,7 +689,10 @@ impl Page {
                 }
 
                 if now >= deadline {
-                    tracing::debug!("Network idle timeout reached with {} active requests", active);
+                    tracing::debug!(
+                        "Network idle timeout reached with {} active requests",
+                        active
+                    );
                     break;
                 }
 
@@ -632,7 +700,8 @@ impl Page {
                     let _ = tokio::time::timeout(
                         tokio::time::Duration::from_millis(50),
                         js.run_event_loop(),
-                    ).await;
+                    )
+                    .await;
                 } else {
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 }
@@ -647,7 +716,9 @@ impl Page {
     pub fn navigate_blank(&mut self) {
         self.js = None;
         self.url = Some(Url::parse("about:blank").unwrap());
-        self.dom = Some(parse_html("<!DOCTYPE html><html><head></head><body></body></html>"));
+        self.dom = Some(parse_html(
+            "<!DOCTYPE html><html><head></head><body></body></html>",
+        ));
         self.title = String::new();
         self.lifecycle = LifecycleState::Loaded;
     }
@@ -675,7 +746,11 @@ impl Page {
             match js.evaluate(expression) {
                 Ok(val) => val,
                 Err(e) => {
-                    tracing::debug!("JS eval error for '{}': {}", &expression[..expression.len().min(80)], e);
+                    tracing::debug!(
+                        "JS eval error for '{}': {}",
+                        &expression[..expression.len().min(80)],
+                        e
+                    );
                     serde_json::Value::Null
                 }
             }
@@ -737,7 +812,16 @@ impl Page {
         await_promise: bool,
     ) -> obscura_js::runtime::RemoteObjectInfo {
         if let Some(js) = &mut self.js {
-            match js.call_function_on_for_cdp(function_declaration, object_id, args, return_by_value, await_promise).await {
+            match js
+                .call_function_on_for_cdp(
+                    function_declaration,
+                    object_id,
+                    args,
+                    return_by_value,
+                    await_promise,
+                )
+                .await
+            {
                 Ok(info) => info,
                 Err(e) => {
                     tracing::debug!("callFunctionOn error: {}", e);
@@ -844,7 +928,10 @@ impl Page {
         }
     }
 
-    pub fn set_intercept_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<obscura_js::ops::InterceptedRequest>) {
+    pub fn set_intercept_tx(
+        &mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<obscura_js::ops::InterceptedRequest>,
+    ) {
         self.intercept_tx = Some(tx.clone());
         if let Some(js) = &self.js {
             js.set_intercept_tx(tx);
