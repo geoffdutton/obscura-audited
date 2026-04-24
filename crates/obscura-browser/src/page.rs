@@ -261,13 +261,19 @@ impl Page {
         }
 
         let client = self.http_client.clone();
+        let page_url = self.url.clone();
         let fetch_futures: Vec<_> = fetch_tasks.iter().map(|(idx, url)| {
             let client = client.clone();
             let url = url.clone();
             let idx = *idx;
+            let page_url = page_url.clone();
             async move {
                 let parsed = Url::parse(&url).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
-                match client.fetch(&parsed).await {
+                let result = match page_url.as_ref() {
+                    Some(origin) => client.fetch_subresource(&parsed, origin).await,
+                    None => client.fetch(&parsed).await,
+                };
+                match result {
                     Ok(resp) => Some((idx, url, resp)),
                     Err(e) => {
                         tracing::warn!("Failed to fetch script {}: {}", url, e);
@@ -520,12 +526,18 @@ impl Page {
         }
 
         let client = self.http_client.clone();
+        let page_url = self.url.clone();
         let css_futures: Vec<_> = css_fetch_urls.iter().map(|full_url| {
             let client = client.clone();
             let url_str = full_url.clone();
+            let page_url = page_url.clone();
             async move {
                 let parsed = Url::parse(&url_str).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
-                match client.fetch(&parsed).await {
+                let result = match page_url.as_ref() {
+                    Some(origin) => client.fetch_subresource(&parsed, origin).await,
+                    None => client.fetch(&parsed).await,
+                };
+                match result {
                     Ok(resp) => Some((url_str, resp)),
                     Err(e) => {
                         tracing::debug!("Failed to fetch stylesheet {}: {}", url_str, e);
