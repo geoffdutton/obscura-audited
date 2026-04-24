@@ -183,41 +183,35 @@ fn compute_ja4(data: &[u8]) -> Option<String> {
                 has_sni = ext_len > 0;
             }
             // signature_algorithms: list_len(2) + sig_alg(2)*
-            0x000d => {
-                if ext_data.len() >= 2 {
-                    let list_len = u16::from_be_bytes([ext_data[0], ext_data[1]]) as usize;
-                    let limit = (2 + list_len).min(ext_data.len());
-                    let mut j = 2usize;
-                    while j + 1 < limit {
-                        sig_algs.push(u16::from_be_bytes([ext_data[j], ext_data[j + 1]]));
-                        j += 2;
-                    }
+            0x000d if ext_data.len() >= 2 => {
+                let list_len = u16::from_be_bytes([ext_data[0], ext_data[1]]) as usize;
+                let limit = (2 + list_len).min(ext_data.len());
+                let mut j = 2usize;
+                while j + 1 < limit {
+                    sig_algs.push(u16::from_be_bytes([ext_data[j], ext_data[j + 1]]));
+                    j += 2;
                 }
             }
             // application_layer_protocol_negotiation: list_len(2) + proto_len(1) + proto
-            0x0010 => {
-                if ext_data.len() >= 4 {
-                    let proto_len = ext_data[2] as usize;
-                    if 3 + proto_len <= ext_data.len() {
-                        if let Ok(s) = std::str::from_utf8(&ext_data[3..3 + proto_len]) {
-                            alpn_first = Some(s.to_string());
-                        }
+            0x0010 if ext_data.len() >= 4 => {
+                let proto_len = ext_data[2] as usize;
+                if 3 + proto_len <= ext_data.len() {
+                    if let Ok(s) = std::str::from_utf8(&ext_data[3..3 + proto_len]) {
+                        alpn_first = Some(s.to_string());
                     }
                 }
             }
             // supported_versions: vlist_len(1) + version(2)*
-            0x002b => {
-                if !ext_data.is_empty() {
-                    let vlist_len = ext_data[0] as usize;
-                    let limit = (1 + vlist_len).min(ext_data.len());
-                    let mut j = 1usize;
-                    while j + 1 < limit {
-                        let v = u16::from_be_bytes([ext_data[j], ext_data[j + 1]]);
-                        if !is_grease(v) && supported_version.is_none_or(|sv| v > sv) {
-                            supported_version = Some(v);
-                        }
-                        j += 2;
+            0x002b if !ext_data.is_empty() => {
+                let vlist_len = ext_data[0] as usize;
+                let limit = (1 + vlist_len).min(ext_data.len());
+                let mut j = 1usize;
+                while j + 1 < limit {
+                    let v = u16::from_be_bytes([ext_data[j], ext_data[j + 1]]);
+                    if !is_grease(v) && supported_version.is_none_or(|sv| v > sv) {
+                        supported_version = Some(v);
                     }
+                    j += 2;
                 }
             }
             _ => {}
