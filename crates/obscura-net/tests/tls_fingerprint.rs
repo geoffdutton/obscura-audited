@@ -419,9 +419,8 @@ async fn h2_settings_snapshot() {
         tls.read_exact(&mut frame_hdr)
             .await
             .expect("read H2 frame header");
-        let payload_len = (u32::from(frame_hdr[0]) << 16
-            | u32::from(frame_hdr[1]) << 8
-            | u32::from(frame_hdr[2])) as usize;
+        let payload_len =
+            u32::from_be_bytes([0, frame_hdr[0], frame_hdr[1], frame_hdr[2]]) as usize;
         let frame_type = frame_hdr[3];
         assert_eq!(
             frame_type, 0x4,
