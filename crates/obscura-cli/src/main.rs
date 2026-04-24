@@ -7,7 +7,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
 #[derive(Parser)]
-#[command(name = "obscura", about = "Obscura - A lightweight headless browser for web scraping and automation")]
+#[command(
+    name = "obscura",
+    about = "Obscura - A lightweight headless browser for web scraping and automation"
+)]
 struct Args {
     #[arg(short, long, global = true)]
     verbose: bool,
@@ -87,9 +90,7 @@ enum Command {
         #[arg(long, default_value = "json")]
         format: String,
     },
-
 }
-
 
 #[derive(Clone, Debug, clap::ValueEnum)]
 enum DumpFormat {
@@ -99,7 +100,8 @@ enum DumpFormat {
 }
 
 fn print_banner(port: u16) {
-    println!(r#"
+    println!(
+        r#"
    ____  _                              
   / __ \| |                             
  | |  | | |__  ___  ___ _   _ _ __ __ _ 
@@ -109,7 +111,9 @@ fn print_banner(port: u16) {
                    
   Headless Browser v0.1.0
   CDP server: ws://127.0.0.1:{}/devtools/browser
-"#, port);
+"#,
+        port
+    );
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -126,7 +130,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     match args.command {
-        Some(Command::Serve { port, proxy, user_agent, stealth, workers }) => {
+        Some(Command::Serve {
+            port,
+            proxy,
+            user_agent,
+            stealth,
+            workers,
+        }) => {
             print_banner(port);
             if let Some(ref proxy) = proxy {
                 tracing::info!("Using proxy: {}", proxy);
@@ -146,10 +156,36 @@ async fn main() -> anyhow::Result<()> {
                 obscura_cdp::start_with_options(port, proxy).await?;
             }
         }
-        Some(Command::Fetch { url, dump, selector, wait, wait_until, user_agent, stealth, eval, quiet }) => {
-            run_fetch(&url, dump, selector, wait, &wait_until, user_agent, stealth, eval, quiet).await?;
+        Some(Command::Fetch {
+            url,
+            dump,
+            selector,
+            wait,
+            wait_until,
+            user_agent,
+            stealth,
+            eval,
+            quiet,
+        }) => {
+            run_fetch(
+                &url,
+                dump,
+                selector,
+                wait,
+                &wait_until,
+                user_agent,
+                stealth,
+                eval,
+                quiet,
+            )
+            .await?;
         }
-        Some(Command::Scrape { urls, eval, concurrency, format }) => {
+        Some(Command::Scrape {
+            urls,
+            eval,
+            concurrency,
+            format,
+        }) => {
             run_parallel_scrape(urls, eval, concurrency, &format).await?;
         }
         None => {
@@ -171,7 +207,6 @@ async fn run_multi_worker_serve(
     stealth: bool,
 ) -> anyhow::Result<()> {
     use tokio::net::TcpListener;
-    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     let exe = std::env::current_exe()?;
     let mut children = Vec::new();
@@ -221,7 +256,12 @@ async fn run_multi_worker_serve(
                 let worker_addr = format!("127.0.0.1:{}", port + 1);
                 if let Ok(mut worker_stream) = tokio::net::TcpStream::connect(&worker_addr).await {
                     tokio::spawn(async move {
-                        let _ = tokio::io::copy_bidirectional(&mut tokio::net::TcpStream::from_std(client_stream.into_std().unwrap()).unwrap(), &mut worker_stream).await;
+                        let _ = tokio::io::copy_bidirectional(
+                            &mut tokio::net::TcpStream::from_std(client_stream.into_std().unwrap())
+                                .unwrap(),
+                            &mut worker_stream,
+                        )
+                        .await;
                     });
                 }
                 continue;
@@ -238,6 +278,7 @@ async fn run_multi_worker_serve(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_fetch(
     url_str: &str,
     dump: DumpFormat,
@@ -249,7 +290,11 @@ async fn run_fetch(
     eval: Option<String>,
     quiet: bool,
 ) -> anyhow::Result<()> {
-    let context = Arc::new(BrowserContext::with_options("fetch".to_string(), None, stealth));
+    let context = Arc::new(BrowserContext::with_options(
+        "fetch".to_string(),
+        None,
+        stealth,
+    ));
     let mut page = Page::new("fetch-page".to_string(), context);
 
     if let Some(ref ua) = user_agent {
@@ -262,9 +307,9 @@ async fn run_fetch(
         eprintln!("Fetching {}...", url_str);
     }
 
-    page.navigate_with_wait(url_str, wait_condition).await.map_err(|e| {
-        anyhow::anyhow!("Failed to navigate to {}: {}", url_str, e)
-    })?;
+    page.navigate_with_wait(url_str, wait_condition)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to navigate to {}: {}", url_str, e))?;
 
     if !quiet {
         eprintln!("Page loaded: {} - \"{}\"", page.url_string(), page.title);
@@ -305,9 +350,9 @@ async fn run_fetch(
 async fn wait_for_selector(page: &mut Page, selector: &str, timeout_secs: u64) -> bool {
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
     loop {
-        let found = page.with_dom(|dom| {
-            dom.query_selector(selector).ok().flatten().is_some()
-        }).unwrap_or(false);
+        let found = page
+            .with_dom(|dom| dom.query_selector(selector).ok().flatten().is_some())
+            .unwrap_or(false);
 
         if found {
             return true;
@@ -364,12 +409,38 @@ fn extract_readable_text(dom: &obscura_dom::DomTree, node_id: obscura_dom::NodeI
             let tag = name.local.as_ref();
             let is_block = matches!(
                 tag,
-                "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
-                    | "li" | "tr" | "br" | "hr" | "blockquote" | "pre"
-                    | "section" | "article" | "header" | "footer" | "nav"
-                    | "main" | "aside" | "figure" | "figcaption" | "table"
-                    | "thead" | "tbody" | "tfoot" | "dl" | "dt" | "dd"
-                    | "ul" | "ol"
+                "div"
+                    | "p"
+                    | "h1"
+                    | "h2"
+                    | "h3"
+                    | "h4"
+                    | "h5"
+                    | "h6"
+                    | "li"
+                    | "tr"
+                    | "br"
+                    | "hr"
+                    | "blockquote"
+                    | "pre"
+                    | "section"
+                    | "article"
+                    | "header"
+                    | "footer"
+                    | "nav"
+                    | "main"
+                    | "aside"
+                    | "figure"
+                    | "figcaption"
+                    | "table"
+                    | "thead"
+                    | "tbody"
+                    | "tfoot"
+                    | "dl"
+                    | "dt"
+                    | "dd"
+                    | "ul"
+                    | "ol"
             );
 
             if tag == "script" || tag == "style" {
@@ -586,7 +657,9 @@ fn dump_links(page: &Page) {
                 let full_url = if href.starts_with("http://") || href.starts_with("https://") {
                     href.clone()
                 } else if let Some(ref base) = base_url {
-                    base.join(&href).map(|u| u.to_string()).unwrap_or(href.clone())
+                    base.join(&href)
+                        .map(|u| u.to_string())
+                        .unwrap_or(href.clone())
                 } else {
                     href.clone()
                 };
