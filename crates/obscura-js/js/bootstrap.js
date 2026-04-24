@@ -1014,7 +1014,6 @@ globalThis.navigator = {
   doNotTrack: null,
   deviceMemory: 8,
   connection: { effectiveType: "4g", rtt: 50, downlink: 10, saveData: false },
-  get webdriver() { return undefined; },
   pdfViewerEnabled: true,
   get plugins() {
     const p = [

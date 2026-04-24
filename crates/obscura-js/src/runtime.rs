@@ -923,6 +923,19 @@ mod tests {
     }
 
     #[test]
+    fn test_webdriver_not_in_navigator() {
+        // Real Chrome does not have webdriver property at all; 'in' check returns false.
+        // Sannysoft detects the getter-defined property even though it returns undefined.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt.evaluate("'webdriver' in navigator").unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!(false),
+            "'webdriver' must not exist as a property on navigator"
+        );
+    }
+
+    #[test]
     fn test_canvas_measure_text_float_width() {
         let mut rt = setup_runtime("<html><body></body></html>");
         let width = rt
