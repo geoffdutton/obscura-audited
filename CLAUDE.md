@@ -20,18 +20,36 @@ as a public artifact.
   that isn't already public in this fork's surface. If in doubt, ask first.
 - Stage files by name, not `git add -A`.
 
+## Working style
+
+Bias toward caution over speed. Use judgment for trivial tasks.
+
+- **Think before coding.** Surface assumptions and uncertainty. If multiple
+  interpretations exist, name them; don't pick silently. If a simpler approach
+  is available, say so.
+- **Simplicity first.** Minimum code that solves the problem. No speculative
+  features, configurability, or error handling for impossible cases. If 200
+  lines could be 50, rewrite it.
+- **Surgical changes.** Every changed line should trace to the request. Don't
+  "improve" adjacent code, comments, or formatting. Clean up only the orphans
+  your change created — leave pre-existing dead code (including the
+  fork-inherited mismatches below) alone unless asked.
+- **Goal-driven.** Turn tasks into verifiable goals ("reproduce the bug in a
+  test, then fix it"). For multi-step work, state a brief plan with a
+  verification check per step.
+
 ## Workspace layout
 
 Cargo workspace, 6 crates under `crates/`:
 
-| Crate | Role |
-|---|---|
-| `obscura-dom` | Servo-derived DOM (html5ever, selectors) |
-| `obscura-net` | HTTP client, cookie jar, tracker blocklist, robots.txt. Stealth: swaps in `wreq` for TLS fingerprint spoofing |
-| `obscura-js` | V8 via `deno_core`; `js/bootstrap.js` provides navigator/document/fetch/XHR/Worker shims + anti-fingerprint overrides |
-| `obscura-browser` | Page / BrowserContext orchestration |
-| `obscura-cdp` | Chrome DevTools Protocol server over WebSocket (binds 127.0.0.1 only) |
-| `obscura-cli` | Produces `obscura` and `obscura-worker` binaries. Subcommands: `serve`, `fetch`, `scrape` |
+| Crate             | Role                                                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `obscura-dom`     | Servo-derived DOM (html5ever, selectors)                                                                              |
+| `obscura-net`     | HTTP client, cookie jar, tracker blocklist, robots.txt. Stealth: swaps in `wreq` for TLS fingerprint spoofing         |
+| `obscura-js`      | V8 via `deno_core`; `js/bootstrap.js` provides navigator/document/fetch/XHR/Worker shims + anti-fingerprint overrides |
+| `obscura-browser` | Page / BrowserContext orchestration                                                                                   |
+| `obscura-cdp`     | Chrome DevTools Protocol server over WebSocket (binds 127.0.0.1 only)                                                 |
+| `obscura-cli`     | Produces `obscura` and `obscura-worker` binaries. Subcommands: `serve`, `fetch`, `scrape`                             |
 
 ## Build & run
 
@@ -45,7 +63,7 @@ cargo fmt --all && cargo clippy --all-targets --all-features -- -D warnings  # p
 ```
 
 - **First build ~5 min** — V8 compiles from source via `deno_core`. Cached after.
-- Requires Rust 1.75+ (edition 2021).
+- Rust edition 2021. No MSRV pinned — check CI (`.github/workflows/ci.yml`) for the version actually tested.
 
 ### Stealth builds on macOS/Windows (Docker)
 
@@ -112,8 +130,15 @@ see `docs/bot-detection-audit.md` before editing:
   in platform-specific TLS). Path-gated to skip on docs-only changes; if you
   add a new source path outside `crates/` or `Cargo.{toml,lock}`, extend the
   `paths:` filter so CI still runs.
-- `crates/obscura-js/js/bootstrap.js` — 124KB, most fingerprint logic lives here.
+- `crates/obscura-js/js/bootstrap.js` — ~125KB, most fingerprint logic lives here.
 - `crates/obscura-cdp/src/server.rs` — CDP WebSocket server, 127.0.0.1-only bind.
+
+## Project-local Claude Code skill
+
+`.claude/skills/verify-stealth/SKILL.md` is checked into the repo — a project-
+local skill that automates the Docker-based bot-detection verification flow
+(sannysoft + creepjs). Triggers on changes to `bootstrap.js` or stealth code.
+If you update the verify flow, keep the skill in sync.
 
 ## Fork-inherited mismatches (do not "fix" in passing)
 
