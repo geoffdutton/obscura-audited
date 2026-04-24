@@ -72,7 +72,7 @@ async fn handle_conn(
         if reader.read_line(&mut hdr).await.unwrap_or(0) == 0 {
             break;
         }
-        let trimmed = hdr.trim_end_matches(|c| c == '\r' || c == '\n');
+        let trimmed = hdr.trim_end_matches(['\r', '\n']);
         if trimmed.is_empty() {
             break;
         }

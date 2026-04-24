@@ -39,7 +39,12 @@ fn client_hints() -> &'static HashMap<String, String> {
 #[cfg(feature = "stealth")]
 fn url_origin(url: &Url) -> String {
     match url.port() {
-        Some(port) => format!("{}://{}:{}", url.scheme(), url.host_str().unwrap_or(""), port),
+        Some(port) => format!(
+            "{}://{}:{}",
+            url.scheme(),
+            url.host_str().unwrap_or(""),
+            port
+        ),
         None => format!("{}://{}", url.scheme(), url.host_str().unwrap_or("")),
     }
 }
