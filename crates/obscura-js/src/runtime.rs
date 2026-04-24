@@ -2007,4 +2007,62 @@ mod tests {
             .unwrap();
         assert_eq!(all_ninf, serde_json::json!(true));
     }
+
+    #[test]
+    fn test_date_prototype_methods_are_functions() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let bad = rt
+            .evaluate(
+                r#"['getTime','toString','toISOString','toJSON','valueOf','getTimezoneOffset',
+                    'getFullYear','getUTCFullYear','getMonth','getDate','getDay',
+                    'getHours','getMinutes','getSeconds','getMilliseconds']
+                     .filter(m => typeof Date.prototype[m] !== 'function')"#,
+            )
+            .unwrap();
+        assert_eq!(bad, serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_date_instance_roundtrip_with_intl() {
+        // Calling Intl.DateTimeFormat.format on a Date must succeed and return a string.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("typeof new Intl.DateTimeFormat('en-US').format(new Date(0))")
+                .unwrap(),
+            serde_json::json!("string")
+        );
+        // And instanceof must work.
+        assert_eq!(
+            rt.evaluate("new Intl.DateTimeFormat('en-US') instanceof Intl.DateTimeFormat")
+                .unwrap(),
+            serde_json::json!(true)
+        );
+    }
+
+    #[test]
+    fn test_date_tostring_timezone_consistent() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let tz = rt
+            .evaluate("new Intl.DateTimeFormat().resolvedOptions().timeZone")
+            .unwrap();
+        assert_eq!(tz, serde_json::json!("America/New_York"));
+    }
+
+    #[test]
+    fn test_get_timezone_offset_matches_pinned_tz() {
+        // If resolvedOptions().timeZone says America/New_York, real Chrome's
+        // getTimezoneOffset returns 300 (EST) or 240 (EDT). We pin to one value
+        // for consistency — creepjs checks timezone coherence.
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let offset = rt
+            .evaluate("new Date().getTimezoneOffset()")
+            .unwrap()
+            .as_f64()
+            .unwrap();
+        assert!(
+            (offset - 300.0).abs() < 1.0 || (offset - 240.0).abs() < 1.0,
+            "expected 300 (EST) or 240 (EDT), got {}",
+            offset
+        );
+    }
 }
