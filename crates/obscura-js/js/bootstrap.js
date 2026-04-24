@@ -2067,6 +2067,50 @@ globalThis.SVGSVGElement = class SVGSVGElement extends SVGGraphicsElement {
   createSVGRect() { return { x:0, y:0, width:0, height:0 }; }
 };
 _markNative(SVGSVGElement);
+
+// CSS Font Loading API — CreepJS probes `new FontFace(...)` as a side-channel
+// for font enumeration. Missing constructor throws and blows up the branch.
+globalThis.FontFace = class FontFace {
+  constructor(family, source, descriptors) {
+    this.family = String(family);
+    this.style = descriptors?.style || 'normal';
+    this.weight = descriptors?.weight || 'normal';
+    this.stretch = descriptors?.stretch || 'normal';
+    this.unicodeRange = descriptors?.unicodeRange || 'U+0-10FFFF';
+    this.variant = descriptors?.variant || 'normal';
+    this.featureSettings = descriptors?.featureSettings || 'normal';
+    this.display = descriptors?.display || 'auto';
+    this.status = 'unloaded';
+    this._source = source;
+    this.loaded = Promise.resolve(this);
+  }
+  load() { this.status = 'loaded'; return Promise.resolve(this); }
+};
+_markNative(globalThis.FontFace);
+
+globalThis.FontFaceSet = class FontFaceSet {
+  constructor() { this._faces = new Set(); }
+  add(f) { this._faces.add(f); return this; }
+  delete(f) { return this._faces.delete(f); }
+  clear() { this._faces.clear(); }
+  has(f) { return this._faces.has(f); }
+  check() { return true; }
+  load() { return Promise.resolve([]); }
+  forEach(cb) { this._faces.forEach(cb); }
+  get size() { return this._faces.size; }
+  [Symbol.iterator]() { return this._faces[Symbol.iterator](); }
+};
+Object.defineProperty(globalThis.FontFaceSet.prototype, Symbol.toStringTag, { value: 'FontFaceSet' });
+_markNative(globalThis.FontFaceSet);
+
+// document.fonts — a single FontFaceSet shared across document lookups.
+const _documentFonts = new globalThis.FontFaceSet();
+Object.defineProperty(Document.prototype, 'fonts', {
+  get() { return _documentFonts; },
+  enumerable: true,
+  configurable: true,
+});
+
 globalThis.Text = Node;
 globalThis.Comment = Node;
 globalThis.DocumentFragment = DocumentFragment;

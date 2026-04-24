@@ -2125,4 +2125,34 @@ mod tests {
             .unwrap();
         assert_eq!(result, serde_json::json!("ok"));
     }
+
+    #[test]
+    fn test_fontface_constructor_and_document_fonts() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("typeof FontFace").unwrap(),
+            serde_json::json!("function")
+        );
+        let shape = rt
+            .evaluate(
+                r#"(function() {
+                    const f = new FontFace('Foo', 'url(x.woff2)');
+                    return { family: f.family, status: f.status,
+                             hasLoad: typeof f.load === 'function' };
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            shape,
+            serde_json::json!({ "family": "Foo", "status": "unloaded", "hasLoad": true })
+        );
+        assert_eq!(
+            rt.evaluate("typeof document.fonts.check").unwrap(),
+            serde_json::json!("function")
+        );
+        assert_eq!(
+            rt.evaluate("document.fonts.check('12px Arial')").unwrap(),
+            serde_json::json!(true)
+        );
+    }
 }
