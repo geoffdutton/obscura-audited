@@ -40,7 +40,6 @@ jobs:
 
       - name: Build stealth
         run: cargo build --release --target ${{ matrix.target }} --features stealth
-        continue-on-error: true
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
