@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/h4ckf0r0day/obscura/main/assets/icon.png" alt="Obscura" width="80" />
+  <img src="https://raw.githubusercontent.com/geoffdutton/obscura-audited/main/assets/icon.png" alt="Obscura" width="80" />
 </p>
 
 <h2 align="center">Obscura</h1>
@@ -10,6 +10,8 @@
 </p>
 
 ---
+
+*Note:* Forked from [h4ckf0r0day/obscura](https://github.com/h4ckf0r0day/obscura/commit/b00a1f20e74fd0099509cbafd7dc33ced82dbcbe)
 
 Obscura is a headless browser engine written in Rust, built for web scraping and AI agent automation. It runs real JavaScript via V8, supports the Chrome DevTools Protocol, and acts as a drop-in replacement for headless Chrome with Puppeteer and Playwright.
 
