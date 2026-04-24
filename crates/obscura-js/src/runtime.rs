@@ -2091,6 +2091,25 @@ mod tests {
     }
 
     #[test]
+    fn test_svg_get_bbox_returns_domrect_shape() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let shape = rt
+            .evaluate(
+                r#"(function() {
+                    const s = document.createElementNS('http://www.w3.org/2000/svg','svg');
+                    document.body.appendChild(s);
+                    const r = s.getBBox();
+                    return { x: typeof r.x, y: typeof r.y, width: typeof r.width, height: typeof r.height };
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            shape,
+            serde_json::json!({ "x": "number", "y": "number", "width": "number", "height": "number" })
+        );
+    }
+
+    #[test]
     fn test_canvas_parsecolor_handles_object_fillstyle() {
         let mut rt = setup_runtime("<html><body></body></html>");
         let result = rt

@@ -802,7 +802,18 @@ class Document extends Node {
   }
   createElementNS(ns, t) {
     const el = this.createElement(t);
-    if (el) el._ns = ns;
+    if (el) {
+      el._ns = ns;
+      // SVG elements get SVG-specific methods (getBBox, getCTM, …) by swapping
+      // their prototype. Root <svg> element gets SVGSVGElement.prototype;
+      // nested SVG tags get SVGGraphicsElement.prototype.
+      if (ns === 'http://www.w3.org/2000/svg') {
+        Object.setPrototypeOf(
+          el,
+          t.toLowerCase() === 'svg' ? SVGSVGElement.prototype : SVGGraphicsElement.prototype,
+        );
+      }
+    }
     return el;
   }
   createTextNode(t) { return _wrap(+_dom("create_text_node", String(t))); }
@@ -2038,8 +2049,24 @@ globalThis.HTMLLegendElement = Element;
 globalThis.HTMLProgressElement = Element;
 globalThis.HTMLDetailsElement = Element;
 globalThis.HTMLDialogElement = Element;
-globalThis.SVGElement = Element;
-globalThis.SVGSVGElement = Element;
+// SVGGraphicsElement / SVGSVGElement carry SVG-only methods like getBBox.
+// Elements created via createElementNS(http://www.w3.org/2000/svg, …) get
+// their prototype swapped to one of these via Object.setPrototypeOf.
+globalThis.SVGElement = class SVGElement extends Element {};
+_markNative(SVGElement);
+globalThis.SVGGraphicsElement = class SVGGraphicsElement extends SVGElement {
+  getBBox() {
+    return { x: 0, y: 0, width: 0, height: 0, toJSON() { return this; } };
+  }
+  getCTM() { return { a:1, b:0, c:0, d:1, e:0, f:0 }; }
+  getScreenCTM() { return { a:1, b:0, c:0, d:1, e:0, f:0 }; }
+};
+_markNative(SVGGraphicsElement);
+globalThis.SVGSVGElement = class SVGSVGElement extends SVGGraphicsElement {
+  createSVGPoint() { return { x:0, y:0, matrixTransform(){ return { x:0, y:0 }; } }; }
+  createSVGRect() { return { x:0, y:0, width:0, height:0 }; }
+};
+_markNative(SVGSVGElement);
 globalThis.Text = Node;
 globalThis.Comment = Node;
 globalThis.DocumentFragment = DocumentFragment;
