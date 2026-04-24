@@ -29,7 +29,7 @@ The **distribution layer** is the real problem. The pre-built tarballs are not c
 | Stars / forks | 1,681 / 123 (at audit) | Extremely high velocity for an anon 10-day-old repo. Either astroturfed or HN/PR spike. |
 | Subscribers / issues | 10 / 14 | Low engagement relative to stars — classic astroturf shape. |
 | Version | `0.1.0` | No track record. |
-| License | README: Apache 2.0. LICENSE file: Apache 2.0 text. `Cargo.toml`: `license = "MIT"` | **Mismatch**. Sloppy. |
+| License | README: Apache 2.0. LICENSE file: Apache 2.0 text. `Cargo.toml`: `license = "MIT"` | **Mismatch**. Likely just needs Cargo.toml update--up to upstream author. |
 
 None of these prove anything. They establish that the operator is unvetted and that conventional OSS trust signals (stars, age, contributor count) either don't exist or are unreliable for this repo.
 
