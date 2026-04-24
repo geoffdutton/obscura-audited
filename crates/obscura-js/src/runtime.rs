@@ -922,6 +922,111 @@ mod tests {
         assert_eq!(chrome, serde_json::json!("object"));
     }
 
+    #[test]
+    fn test_canvas_measure_text_float_width() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let width = rt
+            .evaluate(
+                r#"(() => {
+                const c = document.createElement('canvas');
+                const ctx = c.getContext('2d');
+                ctx.font = '16px sans-serif';
+                return ctx.measureText('Wj.').width;
+            })()"#,
+            )
+            .unwrap();
+        let w = width.as_f64().expect("width should be a number");
+        assert!(w > 0.0, "width should be positive, got {}", w);
+        assert!(
+            w.fract() != 0.0,
+            "width should have sub-pixel precision, got {}",
+            w
+        );
+    }
+
+    #[test]
+    fn test_canvas_measure_text_full_metrics() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let keys = rt
+            .evaluate(
+                r#"(() => {
+                const c = document.createElement('canvas');
+                const ctx = c.getContext('2d');
+                ctx.font = '16px sans-serif';
+                const m = ctx.measureText('hello');
+                return [
+                    'width','actualBoundingBoxLeft','actualBoundingBoxRight',
+                    'actualBoundingBoxAscent','actualBoundingBoxDescent',
+                    'fontBoundingBoxAscent','fontBoundingBoxDescent',
+                    'emHeightAscent','emHeightDescent',
+                    'hangingBaseline','alphabeticBaseline','ideographicBaseline'
+                ].filter(k => typeof m[k] === 'number');
+            })()"#,
+            )
+            .unwrap();
+        let arr = keys.as_array().expect("should return array");
+        assert_eq!(
+            arr.len(),
+            12,
+            "TextMetrics should expose all 12 numeric properties, got {:?}",
+            arr
+        );
+    }
+
+    #[test]
+    fn test_canvas_measure_text_is_textmetrics_instance() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt
+            .evaluate(
+                r#"(() => {
+                const c = document.createElement('canvas');
+                const ctx = c.getContext('2d');
+                const m = ctx.measureText('x');
+                return m instanceof TextMetrics && typeof TextMetrics === 'function';
+            })()"#,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!(true));
+    }
+
+    #[test]
+    fn test_canvas_textmetrics_illegal_constructor() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt
+            .evaluate(
+                r#"(() => {
+                try { new TextMetrics(); return 'constructed'; }
+                catch (e) { return e instanceof TypeError ? 'TypeError' : 'other:' + e.message; }
+            })()"#,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!("TypeError"));
+    }
+
+    #[test]
+    fn test_canvas_fill_and_measure_widths_match() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let matches = rt
+            .evaluate(
+                r#"(() => {
+                const c = document.createElement('canvas');
+                c.width = 400; c.height = 50;
+                const ctx = c.getContext('2d');
+                ctx.font = '16px sans-serif';
+                // Wide string 'W' repeated should measure wider than narrow 'i' repeated.
+                const wide = ctx.measureText('WWWWWWWW').width;
+                const narrow = ctx.measureText('iiiiiiii').width;
+                return wide > narrow * 1.5;
+            })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            matches,
+            serde_json::json!(true),
+            "proportional advance should make 'W' much wider than 'i'"
+        );
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn test_call_function_on_no_args() {
         let mut rt = setup_runtime("<html><head><title>Test</title></head><body></body></html>");
