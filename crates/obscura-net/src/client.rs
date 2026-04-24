@@ -64,13 +64,17 @@ pub enum ResourceType {
 pub type RequestCallback = Arc<dyn Fn(&RequestInfo) + Send + Sync>;
 pub type ResponseCallback = Arc<dyn Fn(&RequestInfo, &Response) + Send + Sync>;
 
-fn validate_url(url: &Url) -> Result<(), ObscuraNetError> {
+/// Reject URLs that target loopback, private, link-local, broadcast, or
+/// documentation addresses. Shared by the HTTP client, the JS `fetch` op,
+/// and the ES-module loader so every outbound request path applies the
+/// same SSRF filter.
+pub fn validate_public_url(url: &Url) -> Result<(), String> {
     let scheme = url.scheme();
     if scheme != "http" && scheme != "https" {
-        return Err(ObscuraNetError::Network(format!(
+        return Err(format!(
             "Forbidden URL scheme '{}' - only http and https are allowed",
             scheme
-        )));
+        ));
     }
 
     if let Some(host) = url.host() {
@@ -82,18 +86,18 @@ fn validate_url(url: &Url) -> Result<(), ObscuraNetError> {
                     || ip.is_broadcast()
                     || ip.is_documentation()
                 {
-                    return Err(ObscuraNetError::Network(format!(
+                    return Err(format!(
                         "Access to private/internal IP address {} is not allowed",
                         ip
-                    )));
+                    ));
                 }
             }
             url::Host::Ipv6(ip) => {
                 if ip.is_loopback() || ip.is_unicast_link_local() {
-                    return Err(ObscuraNetError::Network(format!(
+                    return Err(format!(
                         "Access to private/internal IPv6 address {} is not allowed",
                         ip
-                    )));
+                    ));
                 }
             }
             url::Host::Domain(domain) => {
@@ -103,16 +107,20 @@ fn validate_url(url: &Url) -> Result<(), ObscuraNetError> {
                     || lower_domain == "127.0.0.1"
                     || lower_domain == "::1"
                 {
-                    return Err(ObscuraNetError::Network(format!(
+                    return Err(format!(
                         "Access to localhost domain '{}' is not allowed",
                         domain
-                    )));
+                    ));
                 }
             }
         }
     }
 
     Ok(())
+}
+
+fn validate_url(url: &Url) -> Result<(), ObscuraNetError> {
+    validate_public_url(url).map_err(ObscuraNetError::Network)
 }
 
 pub struct ObscuraHttpClient {

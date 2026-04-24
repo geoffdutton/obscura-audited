@@ -1,4 +1,5 @@
 use std::pin::Pin;
+use std::time::Duration;
 
 use deno_core::error::ModuleLoaderError;
 use deno_core::ModuleLoadResponse;
@@ -7,6 +8,7 @@ use deno_core::ModuleSource;
 use deno_core::ModuleSourceCode;
 use deno_core::ModuleSpecifier;
 use deno_core::RequestedModuleType;
+use obscura_net::validate_public_url;
 
 pub struct ObscuraModuleLoader {
     pub base_url: String,
@@ -52,9 +54,15 @@ impl ModuleLoader for ObscuraModuleLoader {
         _requested_module_type: RequestedModuleType,
     ) -> ModuleLoadResponse {
         let url = module_specifier.to_string();
+        let parsed = module_specifier.clone();
 
         ModuleLoadResponse::Async(Pin::from(Box::new(async move {
+            validate_public_url(&parsed).map_err(|e| {
+                io_err(format!("Refused to load module {}: {}", url, e))
+            })?;
+
             let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
                 .build()
                 .map_err(|e| io_err(format!("HTTP client error: {}", e)))?;
 
