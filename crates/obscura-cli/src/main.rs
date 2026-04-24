@@ -206,7 +206,6 @@ async fn run_multi_worker_serve(
     proxy: Option<String>,
     stealth: bool,
 ) -> anyhow::Result<()> {
-    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::TcpListener;
 
     let exe = std::env::current_exe()?;
@@ -279,6 +278,7 @@ async fn run_multi_worker_serve(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_fetch(
     url_str: &str,
     dump: DumpFormat,

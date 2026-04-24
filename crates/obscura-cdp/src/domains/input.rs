@@ -13,14 +13,6 @@ pub async fn handle(
             let event_type = params.get("type").and_then(|v| v.as_str()).unwrap_or("");
             let x = params.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let y = params.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let button = params
-                .get("button")
-                .and_then(|v| v.as_str())
-                .unwrap_or("left");
-            let click_count = params
-                .get("clickCount")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(1);
 
             if event_type == "mousePressed" {
                 if let Some(page) = ctx.get_session_page_mut(session_id) {
@@ -133,20 +125,18 @@ pub async fn handle(
                         );
                         page.evaluate(&js);
                     }
-                    "char" => {
-                        if !text.is_empty() {
-                            let js = format!(
-                                "(function() {{\
+                    "char" if !text.is_empty() => {
+                        let js = format!(
+                            "(function() {{\
                                     var target = document.activeElement;\
                                     if (target && (target.localName === 'input' || target.localName === 'textarea')) {{\
                                         target.value = (target.value || '') + '{text}';\
                                         target.dispatchEvent(new Event('input', {{bubbles:true}}));\
                                     }}\
                                 }})()",
-                                text = text.replace('\'', "\\'").replace('\\', "\\\\"),
-                            );
-                            page.evaluate(&js);
-                        }
+                            text = text.replace('\'', "\\'").replace('\\', "\\\\"),
+                        );
+                        page.evaluate(&js);
                     }
                     _ => {}
                 }

@@ -15,6 +15,8 @@ struct CookieEntry {
     secure: bool,
     http_only: bool,
     expires: Option<u64>,
+    // Parsed from Set-Cookie but not yet enforced on outgoing requests; CSRF-relevant.
+    #[allow(dead_code)]
     same_site: String,
 }
 
@@ -276,11 +278,8 @@ impl CookieJar {
                         }
                         _ => {}
                     }
-                } else {
-                    match attr.to_lowercase().as_str() {
-                        "secure" => secure = true,
-                        _ => {}
-                    }
+                } else if attr.to_lowercase().as_str() == "secure" {
+                    secure = true;
                 }
             }
         }
@@ -386,14 +385,14 @@ fn parse_http_date(s: &str) -> Result<u64, ()> {
 
     let mut days_total: u64 = 0;
     for y in 1970..year {
-        days_total += if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+        days_total += if y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400)) {
             366
         } else {
             365
         };
     }
     let days_in_month = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let is_leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
     for m in 1..month {
         days_total += days_in_month[m as usize] + if m == 2 && is_leap { 1 } else { 0 };
     }

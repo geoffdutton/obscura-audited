@@ -1,11 +1,8 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tokio::sync::Mutex;
 
 use crate::dispatch::CdpContext;
-use crate::types::CdpEvent;
 
 pub struct PausedRequest {
     pub request_id: String,
@@ -38,6 +35,12 @@ pub struct FetchInterceptState {
     pub patterns: Vec<String>,
     pub paused: HashMap<String, PausedRequest>,
     request_counter: u64,
+}
+
+impl Default for FetchInterceptState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FetchInterceptState {

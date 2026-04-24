@@ -42,7 +42,7 @@ pub async fn start_with_options(port: u16, proxy: Option<String>) -> anyhow::Res
         .run_until(async {
             let (msg_tx, msg_rx) = mpsc::unbounded_channel::<ServerMessage>();
 
-            let processor_handle = tokio::task::spawn_local(cdp_processor(msg_rx, proxy));
+            tokio::task::spawn_local(cdp_processor(msg_rx, proxy));
 
             loop {
                 match listener.accept().await {
@@ -112,7 +112,7 @@ async fn cdp_processor(mut rx: mpsc::UnboundedReceiver<ServerMessage>, proxy: Op
 
 fn handle_fetch_resolution(
     text: &str,
-    ctx: &mut CdpContext,
+    _ctx: &mut CdpContext,
     reply_tx: &mpsc::UnboundedSender<String>,
     intercepted_paused: &mut HashMap<
         String,
@@ -289,7 +289,9 @@ async fn process_with_interception(
         let _ = nav_done_tx.send((page, result)).await;
     });
 
+    #[allow(unused_assignments)]
     let mut navigate_result: Result<(), String> = Ok(());
+    #[allow(unused_assignments)]
     let mut page_back: Option<obscura_browser::Page> = None;
 
     loop {

@@ -56,6 +56,12 @@ pub struct ObscuraState {
     pub intercept_enabled: bool,
 }
 
+impl Default for ObscuraState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ObscuraState {
     pub fn new() -> Self {
         ObscuraState {
@@ -465,12 +471,7 @@ async fn op_fetch_url(
                     })
                     .to_string());
                 }
-                Ok(InterceptResolution::Continue {
-                    url: new_url,
-                    method: new_method,
-                    headers: new_headers,
-                    body: new_body,
-                }) => {
+                Ok(InterceptResolution::Continue { .. }) => {
                     tracing::debug!("Interception: continue request {}", url);
                 }
                 Err(_) => {}
@@ -653,11 +654,11 @@ fn glob_match(pattern: &str, url: &str) -> bool {
     if pattern.starts_with('*') && pattern.ends_with('*') {
         return url.contains(&pattern[1..pattern.len() - 1]);
     }
-    if pattern.starts_with('*') {
-        return url.ends_with(&pattern[1..]);
+    if let Some(stripped) = pattern.strip_prefix('*') {
+        return url.ends_with(stripped);
     }
-    if pattern.ends_with('*') {
-        return url.starts_with(&pattern[..pattern.len() - 1]);
+    if let Some(stripped) = pattern.strip_suffix('*') {
+        return url.starts_with(stripped);
     }
     url == pattern
 }

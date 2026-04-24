@@ -86,12 +86,12 @@ impl Page {
                 if url.contains(&pattern[1..pattern.len() - 1]) {
                     return true;
                 }
-            } else if pattern.starts_with('*') {
-                if url.ends_with(&pattern[1..]) {
+            } else if let Some(stripped) = pattern.strip_prefix('*') {
+                if url.ends_with(stripped) {
                     return true;
                 }
-            } else if pattern.ends_with('*') {
-                if url.starts_with(&pattern[..pattern.len() - 1]) {
+            } else if let Some(stripped) = pattern.strip_suffix('*') {
+                if url.starts_with(stripped) {
                     return true;
                 }
             } else if url.contains(pattern) {
@@ -114,22 +114,23 @@ impl Page {
             let title = self.title.clone();
             let dom = self.dom.take();
 
-            let js = self.js.as_mut().unwrap();
-            js.set_url(&url_str);
-            js.set_title(&title);
+            if let Some(js) = self.js.as_mut() {
+                js.set_url(&url_str);
+                js.set_title(&title);
 
-            if let Some(d) = dom {
-                js.set_dom(d);
+                if let Some(d) = dom {
+                    js.set_dom(d);
+                }
+
+                let _ = js.execute_script(
+                    "<reset>",
+                    "_cache.clear(); globalThis.__obscura_objects = {}; globalThis.__obscura_oid = 0; \
+                     _iframeRegistry.length = 0; globalThis.length = 0; \
+                     globalThis._formValues = {}; globalThis._formChecked = {}; \
+                     globalThis._eventRegistry = {}; \
+                     globalThis.document = new Document(+_dom('document_node_id'));",
+                );
             }
-
-            let _ = js.execute_script(
-                "<reset>",
-                "_cache.clear(); globalThis.__obscura_objects = {}; globalThis.__obscura_oid = 0; \
-                 _iframeRegistry.length = 0; globalThis.length = 0; \
-                 globalThis._formValues = {}; globalThis._formChecked = {}; \
-                 globalThis._eventRegistry = {}; \
-                 globalThis.document = new Document(+_dom('document_node_id'));",
-            );
 
             return;
         }
@@ -253,8 +254,8 @@ impl Page {
         );
         let all_to_execute: Vec<ScriptInfo> = scripts
             .into_iter()
-            .chain(deferred.into_iter())
-            .chain(async_scripts.into_iter())
+            .chain(deferred)
+            .chain(async_scripts)
             .collect();
 
         let mut resolved: Vec<(usize, String)> = Vec::new();
@@ -307,11 +308,9 @@ impl Page {
 
         let mut fetched: std::collections::HashMap<usize, (String, String, obscura_net::Response)> =
             std::collections::HashMap::new();
-        for result in fetch_results {
-            if let Some((idx, url, resp)) = result {
-                let code = String::from_utf8_lossy(&resp.body).to_string();
-                fetched.insert(idx, (url, code, resp));
-            }
+        for (idx, url, resp) in fetch_results.into_iter().flatten() {
+            let code = String::from_utf8_lossy(&resp.body).to_string();
+            fetched.insert(idx, (url, code, resp));
         }
 
         for (i, script) in all_to_execute.iter().enumerate() {
@@ -596,19 +595,17 @@ impl Page {
 
         let css_results = futures::future::join_all(css_futures).await;
         let mut css_sources = Vec::new();
-        for result in css_results {
-            if let Some((url_str, resp)) = result {
-                let css = String::from_utf8_lossy(&resp.body).to_string();
-                self.record_network_event(
-                    &url_str,
-                    "GET",
-                    "Stylesheet",
-                    resp.status,
-                    &resp.headers,
-                    resp.body.len(),
-                );
-                css_sources.push(css);
-            }
+        for (url_str, resp) in css_results.into_iter().flatten() {
+            let css = String::from_utf8_lossy(&resp.body).to_string();
+            self.record_network_event(
+                &url_str,
+                "GET",
+                "Stylesheet",
+                resp.status,
+                &resp.headers,
+                resp.body.len(),
+            );
+            css_sources.push(css);
         }
 
         self.dom = Some(dom);
