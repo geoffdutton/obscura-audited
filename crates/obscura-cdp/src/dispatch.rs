@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use obscura_browser::{BrowserContext, Page};
-use obscura_js::ops::{InterceptResolution, InterceptedRequest};
+use obscura_js::ops::InterceptedRequest;
 use serde_json::json;
 
 use crate::domains;
@@ -19,6 +19,12 @@ pub struct CdpContext {
     pub preload_counter: u32,
     pub fetch_intercept: FetchInterceptState,
     pub intercept_tx: Option<tokio::sync::mpsc::UnboundedSender<InterceptedRequest>>,
+}
+
+impl Default for CdpContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CdpContext {
@@ -64,9 +70,7 @@ impl CdpContext {
     }
 
     pub fn get_session_page(&self, session_id: &Option<String>) -> Option<&Page> {
-        let page_id = session_id
-            .as_ref()
-            .and_then(|sid| self.sessions.get(sid))?;
+        let page_id = session_id.as_ref().and_then(|sid| self.sessions.get(sid))?;
         self.get_page(page_id)
     }
 
@@ -118,9 +122,8 @@ pub async fn dispatch(req: &CdpRequest, ctx: &mut CdpContext) -> CdpResponse {
         "Input" => domains::input::handle(method, &req.params, ctx, &req.session_id).await,
         "Storage" => domains::storage::handle(method, &req.params, ctx, &req.session_id).await,
         "LP" => domains::lp::handle(method, &req.params, ctx, &req.session_id).await,
-        "Emulation" | "Log" | "Performance" | "Security" | "CSS"
-        | "Accessibility" | "ServiceWorker" | "Inspector"
-        | "Debugger" | "Profiler" | "HeapProfiler" | "Overlay" => {
+        "Emulation" | "Log" | "Performance" | "Security" | "CSS" | "Accessibility"
+        | "ServiceWorker" | "Inspector" | "Debugger" | "Profiler" | "HeapProfiler" | "Overlay" => {
             Ok(json!({}))
         }
         _ => Err(format!("Unknown domain: {}", domain)),

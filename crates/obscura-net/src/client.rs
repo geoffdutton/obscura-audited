@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -220,25 +219,27 @@ impl ObscuraHttpClient {
     }
 
     async fn get_client(&self) -> &Client {
-        self.client.get_or_init(|| async {
-            let mut builder = Client::builder()
-                .redirect(Policy::none())
-                .timeout(Duration::from_secs(30))
-                .danger_accept_invalid_certs(false)
-;
+        self.client
+            .get_or_init(|| async {
+                let mut builder = Client::builder()
+                    .redirect(Policy::none())
+                    .timeout(Duration::from_secs(30))
+                    .danger_accept_invalid_certs(false);
 
-            if let Some(ref proxy) = self.proxy_url {
-                if let Ok(p) = reqwest::Proxy::all(proxy.as_str()) {
-                    builder = builder.proxy(p);
+                if let Some(ref proxy) = self.proxy_url {
+                    if let Ok(p) = reqwest::Proxy::all(proxy.as_str()) {
+                        builder = builder.proxy(p);
+                    }
                 }
-            }
 
-            builder.build().expect("failed to build HTTP client")
-        }).await
+                builder.build().expect("failed to build HTTP client")
+            })
+            .await
     }
 
     pub async fn fetch(&self, url: &Url) -> Result<Response, ObscuraNetError> {
-        self.fetch_with_method(Method::GET, url, None, RequestInitiator::TopLevel).await
+        self.fetch_with_method(Method::GET, url, None, RequestInitiator::TopLevel)
+            .await
     }
 
     pub async fn fetch_subresource(
@@ -246,7 +247,8 @@ impl ObscuraHttpClient {
         url: &Url,
         initiator: &Url,
     ) -> Result<Response, ObscuraNetError> {
-        self.fetch_with_method(Method::GET, url, None, RequestInitiator::Page(initiator)).await
+        self.fetch_with_method(Method::GET, url, None, RequestInitiator::Page(initiator))
+            .await
     }
 
     pub async fn post_form(&self, url: &Url, body: &str) -> Result<Response, ObscuraNetError> {
@@ -266,10 +268,13 @@ impl ObscuraHttpClient {
         initial_body: Option<Vec<u8>>,
         initiator: RequestInitiator<'_>,
     ) -> Result<Response, ObscuraNetError> {
-        validate_url(url, match initiator {
-            RequestInitiator::TopLevel => RequestInitiator::TopLevel,
-            RequestInitiator::Page(u) => RequestInitiator::Page(u),
-        })?;
+        validate_url(
+            url,
+            match initiator {
+                RequestInitiator::TopLevel => RequestInitiator::TopLevel,
+                RequestInitiator::Page(u) => RequestInitiator::Page(u),
+            },
+        )?;
         let redirect_initiator = match initiator {
             RequestInitiator::TopLevel => None,
             RequestInitiator::Page(u) => Some(u.clone()),
@@ -339,7 +344,9 @@ impl ObscuraHttpClient {
             );
             headers.insert(
                 HeaderName::from_static("sec-ch-ua"),
-                HeaderValue::from_static("\"Chromium\";v=\"145\", \"Not;A=Brand\";v=\"24\", \"Google Chrome\";v=\"145\""),
+                HeaderValue::from_static(
+                    "\"Chromium\";v=\"145\", \"Not;A=Brand\";v=\"24\", \"Google Chrome\";v=\"145\"",
+                ),
             );
             headers.insert(
                 HeaderName::from_static("sec-ch-ua-mobile"),
@@ -386,7 +393,10 @@ impl ObscuraHttpClient {
                 }
             }
 
-            let mut req_builder = self.get_client().await.request(method.clone(), current_url.as_str())
+            let mut req_builder = self
+                .get_client()
+                .await
+                .request(method.clone(), current_url.as_str())
                 .headers(headers);
 
             if let Some(ref b) = body {
@@ -399,12 +409,15 @@ impl ObscuraHttpClient {
                 req_builder = req_builder.body(b.clone());
             }
 
-            self.in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.in_flight
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let resp = req_builder.send().await.map_err(|e| {
-                self.in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                self.in_flight
+                    .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                 ObscuraNetError::Network(format!("{}: {}", current_url, e))
             })?;
-            self.in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            self.in_flight
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
             let status = resp.status();
 
@@ -417,7 +430,12 @@ impl ObscuraHttpClient {
             let response_headers: HashMap<String, String> = resp
                 .headers()
                 .iter()
-                .map(|(k, v)| (k.as_str().to_lowercase(), v.to_str().unwrap_or("").to_string()))
+                .map(|(k, v)| {
+                    (
+                        k.as_str().to_lowercase(),
+                        v.to_str().unwrap_or("").to_string(),
+                    )
+                })
                 .collect();
 
             if status.is_redirection() {
@@ -446,9 +464,11 @@ impl ObscuraHttpClient {
                 }
             }
 
-            let body_bytes = resp.bytes().await.map_err(|e| {
-                ObscuraNetError::Network(format!("Failed to read body: {}", e))
-            })?.to_vec();
+            let body_bytes = resp
+                .bytes()
+                .await
+                .map_err(|e| ObscuraNetError::Network(format!("Failed to read body: {}", e)))?
+                .to_vec();
 
             let response = Response {
                 url: current_url,
@@ -513,58 +533,118 @@ mod pna_tests {
 
     #[test]
     fn classifies_ipv4_loopback_as_local() {
-        assert_eq!(classify_address_space(&u("http://127.0.0.1/")), AddressSpace::Local);
-        assert_eq!(classify_address_space(&u("http://127.0.0.5/")), AddressSpace::Local);
+        assert_eq!(
+            classify_address_space(&u("http://127.0.0.1/")),
+            AddressSpace::Local
+        );
+        assert_eq!(
+            classify_address_space(&u("http://127.0.0.5/")),
+            AddressSpace::Local
+        );
     }
 
     #[test]
     fn classifies_ipv6_loopback_as_local() {
-        assert_eq!(classify_address_space(&u("http://[::1]/")), AddressSpace::Local);
+        assert_eq!(
+            classify_address_space(&u("http://[::1]/")),
+            AddressSpace::Local
+        );
     }
 
     #[test]
     fn classifies_localhost_hostname_as_local() {
-        assert_eq!(classify_address_space(&u("http://localhost/")), AddressSpace::Local);
-        assert_eq!(classify_address_space(&u("http://LOCALHOST/")), AddressSpace::Local);
-        assert_eq!(classify_address_space(&u("http://foo.localhost/")), AddressSpace::Local);
+        assert_eq!(
+            classify_address_space(&u("http://localhost/")),
+            AddressSpace::Local
+        );
+        assert_eq!(
+            classify_address_space(&u("http://LOCALHOST/")),
+            AddressSpace::Local
+        );
+        assert_eq!(
+            classify_address_space(&u("http://foo.localhost/")),
+            AddressSpace::Local
+        );
     }
 
     #[test]
     fn classifies_rfc1918_as_private() {
-        assert_eq!(classify_address_space(&u("http://10.0.0.1/")), AddressSpace::Private);
-        assert_eq!(classify_address_space(&u("http://192.168.1.1/")), AddressSpace::Private);
-        assert_eq!(classify_address_space(&u("http://172.16.0.1/")), AddressSpace::Private);
-        assert_eq!(classify_address_space(&u("http://172.31.255.255/")), AddressSpace::Private);
+        assert_eq!(
+            classify_address_space(&u("http://10.0.0.1/")),
+            AddressSpace::Private
+        );
+        assert_eq!(
+            classify_address_space(&u("http://192.168.1.1/")),
+            AddressSpace::Private
+        );
+        assert_eq!(
+            classify_address_space(&u("http://172.16.0.1/")),
+            AddressSpace::Private
+        );
+        assert_eq!(
+            classify_address_space(&u("http://172.31.255.255/")),
+            AddressSpace::Private
+        );
     }
 
     #[test]
     fn classifies_edge_of_rfc1918_correctly() {
-        assert_eq!(classify_address_space(&u("http://172.15.0.1/")), AddressSpace::Public);
-        assert_eq!(classify_address_space(&u("http://172.32.0.1/")), AddressSpace::Public);
+        assert_eq!(
+            classify_address_space(&u("http://172.15.0.1/")),
+            AddressSpace::Public
+        );
+        assert_eq!(
+            classify_address_space(&u("http://172.32.0.1/")),
+            AddressSpace::Public
+        );
     }
 
     #[test]
     fn classifies_ipv4_link_local_as_private() {
-        assert_eq!(classify_address_space(&u("http://169.254.1.1/")), AddressSpace::Private);
-        assert_eq!(classify_address_space(&u("http://169.254.169.254/")), AddressSpace::Private);
+        assert_eq!(
+            classify_address_space(&u("http://169.254.1.1/")),
+            AddressSpace::Private
+        );
+        assert_eq!(
+            classify_address_space(&u("http://169.254.169.254/")),
+            AddressSpace::Private
+        );
     }
 
     #[test]
     fn classifies_ipv6_ula_as_private() {
-        assert_eq!(classify_address_space(&u("http://[fc00::1]/")), AddressSpace::Private);
-        assert_eq!(classify_address_space(&u("http://[fd12:3456::1]/")), AddressSpace::Private);
+        assert_eq!(
+            classify_address_space(&u("http://[fc00::1]/")),
+            AddressSpace::Private
+        );
+        assert_eq!(
+            classify_address_space(&u("http://[fd12:3456::1]/")),
+            AddressSpace::Private
+        );
     }
 
     #[test]
     fn classifies_ipv6_link_local_as_private() {
-        assert_eq!(classify_address_space(&u("http://[fe80::1]/")), AddressSpace::Private);
+        assert_eq!(
+            classify_address_space(&u("http://[fe80::1]/")),
+            AddressSpace::Private
+        );
     }
 
     #[test]
     fn classifies_public_addresses_as_public() {
-        assert_eq!(classify_address_space(&u("http://8.8.8.8/")), AddressSpace::Public);
-        assert_eq!(classify_address_space(&u("http://example.com/")), AddressSpace::Public);
-        assert_eq!(classify_address_space(&u("http://[2001:db8::1]/")), AddressSpace::Public);
+        assert_eq!(
+            classify_address_space(&u("http://8.8.8.8/")),
+            AddressSpace::Public
+        );
+        assert_eq!(
+            classify_address_space(&u("http://example.com/")),
+            AddressSpace::Public
+        );
+        assert_eq!(
+            classify_address_space(&u("http://[2001:db8::1]/")),
+            AddressSpace::Public
+        );
     }
 
     #[test]
@@ -599,14 +679,20 @@ mod pna_tests {
     fn page_public_to_private_is_blocked() {
         let page = u("https://example.com/");
         assert!(validate_pna(&u("http://10.0.0.1/"), RequestInitiator::Page(&page)).is_err());
-        assert!(validate_pna(&u("http://169.254.169.254/"), RequestInitiator::Page(&page)).is_err());
+        assert!(
+            validate_pna(&u("http://169.254.169.254/"), RequestInitiator::Page(&page)).is_err()
+        );
         assert!(validate_pna(&u("http://192.168.1.1/"), RequestInitiator::Page(&page)).is_err());
     }
 
     #[test]
     fn page_public_to_public_is_allowed() {
         let page = u("https://example.com/");
-        assert!(validate_pna(&u("https://other.example.org/"), RequestInitiator::Page(&page)).is_ok());
+        assert!(validate_pna(
+            &u("https://other.example.org/"),
+            RequestInitiator::Page(&page)
+        )
+        .is_ok());
         assert!(validate_pna(&u("http://8.8.8.8/"), RequestInitiator::Page(&page)).is_ok());
     }
 
