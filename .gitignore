@@ -32,3 +32,6 @@ lcov.info
 .claude/settings.local.json
 .claude.local.md
 .claude/scheduled_tasks.lock
+
+# Git worktrees used by subagent-driven-development
+.worktrees/
