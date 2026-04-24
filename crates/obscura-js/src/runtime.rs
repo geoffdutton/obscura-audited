@@ -1937,4 +1937,74 @@ mod tests {
             serde_json::json!("undefined")
         );
     }
+
+    #[test]
+    fn test_audiocontext_has_samplerate_and_listener() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("typeof new AudioContext().sampleRate").unwrap(),
+            serde_json::json!("number")
+        );
+        assert_eq!(
+            rt.evaluate("typeof new AudioContext().addEventListener")
+                .unwrap(),
+            serde_json::json!("function")
+        );
+    }
+
+    #[test]
+    fn test_offlineaudiocontext_has_samplerate() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        assert_eq!(
+            rt.evaluate("new OfflineAudioContext(1,44100,44100).sampleRate")
+                .unwrap()
+                .as_f64()
+                .unwrap(),
+            44100.0
+        );
+    }
+
+    #[test]
+    fn test_dynamics_compressor_audioparam_ranges() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let shape = rt
+            .evaluate(
+                r#"(function() {
+                    const ac = new AudioContext();
+                    const c = ac.createDynamicsCompressor();
+                    return {
+                        thresholdMax: typeof c.threshold.maxValue,
+                        thresholdMin: typeof c.threshold.minValue,
+                        ratioDefault: typeof c.ratio.defaultValue,
+                    };
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            shape,
+            serde_json::json!({
+                "thresholdMax": "number",
+                "thresholdMin": "number",
+                "ratioDefault": "number"
+            })
+        );
+    }
+
+    #[test]
+    fn test_analyser_get_float_frequency_is_silence() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let all_ninf = rt
+            .evaluate(
+                r#"(function() {
+                    const ac = new AudioContext();
+                    const an = ac.createAnalyser();
+                    const buf = new Float32Array(an.frequencyBinCount);
+                    an.getFloatFrequencyData(buf);
+                    for (let i = 0; i < buf.length; i++) if (buf[i] !== -Infinity) return false;
+                    return true;
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(all_ninf, serde_json::json!(true));
+    }
 }

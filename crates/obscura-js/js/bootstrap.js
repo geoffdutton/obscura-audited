@@ -2626,29 +2626,93 @@ Element.prototype.attachShadow = function attachShadow(opts) {
 
 _markNative(Element.prototype.attachShadow);
 
+// AudioParam shape matches what CreepJS probes:
+// {value, defaultValue, minValue, maxValue, setValueAtTime, ...}
+const _AudioParam = (value, minValue, maxValue) => ({
+  value, defaultValue: value, minValue, maxValue,
+  setValueAtTime(){}, setTargetAtTime(){}, linearRampToValueAtTime(){}, exponentialRampToValueAtTime(){},
+  cancelScheduledValues(){}, setValueCurveAtTime(){},
+});
+
 globalThis.AudioContext = class AudioContext {
-  constructor() { this.sampleRate=_fp('audioSampleRate'); this.state='running'; this.currentTime=0; this.baseLatency=_fp('audioBaseLatency'); this.destination={maxChannelCount:2,numberOfInputs:1,numberOfOutputs:0,channelCount:2}; }
-  createOscillator() { return {type:'sine',frequency:{value:440,setValueAtTime(){}},connect(){},start(){},stop(){},disconnect(){},addEventListener(){}}; }
-  createDynamicsCompressor() { return {threshold:{value:_fp('compThreshold')},knee:{value:_fp('compKnee')},ratio:{value:_fp('compRatio')},attack:{value:0.003},release:{value:0.25},reduction:0,connect(){},disconnect(){}}; }
-  createAnalyser() {
-    return {fftSize:2048,frequencyBinCount:1024,connect(){},disconnect(){},
-      getByteFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=Math.floor(_fpRand(600+i)*10);},
-      getFloatFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=-100+_fpRand(700+i)*5;}
+  constructor() {
+    this.sampleRate = _fp('audioSampleRate');
+    this.state = 'running';
+    this.currentTime = 0;
+    this.baseLatency = _fp('audioBaseLatency');
+    this.destination = { maxChannelCount:2, numberOfInputs:1, numberOfOutputs:0, channelCount:2, connect(){}, disconnect(){} };
+    this._listeners = Object.create(null);
+  }
+  addEventListener(type, fn) { (this._listeners[type] ||= []).push(fn); }
+  removeEventListener(type, fn) {
+    if (this._listeners[type]) this._listeners[type] = this._listeners[type].filter(h => h !== fn);
+  }
+  dispatchEvent() { return true; }
+  createOscillator() {
+    return {
+      type: 'sine',
+      frequency: _AudioParam(440, -this.sampleRate/2, this.sampleRate/2),
+      detune: _AudioParam(0, -153600, 153600),
+      connect(){}, start(){}, stop(){}, disconnect(){}, addEventListener(){},
     };
   }
-  createGain() { return {gain:{value:1,setValueAtTime(){}},connect(){},disconnect(){}}; }
-  createBiquadFilter() { return {type:'lowpass',frequency:{value:350},Q:{value:1},connect(){},disconnect(){}}; }
-  createBufferSource() { return {buffer:null,connect(){},start(){},stop(){},disconnect(){},loop:false}; }
-  createBuffer(ch,len,rate) { return {length:len,sampleRate:rate,numberOfChannels:ch,getChannelData(c){return new Float32Array(len);},duration:len/rate}; }
-  createScriptProcessor() { return {connect(){},disconnect(){},onaudioprocess:null}; }
-  decodeAudioData(buf) { return Promise.resolve(this.createBuffer(2,44100,44100)); }
-  resume() { this.state='running'; return Promise.resolve(); }
-  suspend() { this.state='suspended'; return Promise.resolve(); }
-  close() { this.state='closed'; return Promise.resolve(); }
+  createDynamicsCompressor() {
+    return {
+      threshold: _AudioParam(_fp('compThreshold'), -100, 0),
+      knee:      _AudioParam(_fp('compKnee'),       0, 40),
+      ratio:     _AudioParam(_fp('compRatio'),      1, 20),
+      attack:    _AudioParam(0.003, 0, 1),
+      release:   _AudioParam(0.25,  0, 1),
+      reduction: 0,
+      connect(){}, disconnect(){},
+    };
+  }
+  createAnalyser() {
+    return {
+      fftSize: 2048, frequencyBinCount: 1024,
+      minDecibels: -100, maxDecibels: -30, smoothingTimeConstant: 0.8,
+      connect(){}, disconnect(){},
+      // CreepJS expects headless/silent AnalyserNode output — real silence is -Infinity.
+      getByteFrequencyData(a){ for(let i=0;i<a.length;i++) a[i] = 0; },
+      getFloatFrequencyData(a){ for(let i=0;i<a.length;i++) a[i] = -Infinity; },
+      getByteTimeDomainData(a){ for(let i=0;i<a.length;i++) a[i] = 128; },
+      getFloatTimeDomainData(a){ for(let i=0;i<a.length;i++) a[i] = 0; },
+    };
+  }
+  createGain() { return { gain: _AudioParam(1, 0, 3.4e38), connect(){}, disconnect(){} }; }
+  createBiquadFilter() {
+    return {
+      type: 'lowpass',
+      frequency: _AudioParam(350, 0, this.sampleRate/2),
+      detune:    _AudioParam(0, -153600, 153600),
+      Q:         _AudioParam(1, -3.4e38, 3.4e38),
+      gain:      _AudioParam(0, -40, 40),
+      connect(){}, disconnect(){}, getFrequencyResponse(){},
+    };
+  }
+  createBufferSource() {
+    return {
+      buffer: null,
+      playbackRate: _AudioParam(1, -3.4e38, 3.4e38),
+      connect(){}, start(){}, stop(){}, disconnect(){}, loop: false,
+    };
+  }
+  createBuffer(ch, len, rate) { return { length: len, sampleRate: rate, numberOfChannels: ch, getChannelData(){ return new Float32Array(len); }, duration: len/rate }; }
+  createScriptProcessor() { return { connect(){}, disconnect(){}, onaudioprocess: null }; }
+  decodeAudioData(buf) { return Promise.resolve(this.createBuffer(2, 44100, 44100)); }
+  resume() { this.state = 'running'; return Promise.resolve(); }
+  suspend() { this.state = 'suspended'; return Promise.resolve(); }
+  close() { this.state = 'closed'; return Promise.resolve(); }
 };
 globalThis.OfflineAudioContext = class OfflineAudioContext extends AudioContext {
-  constructor(ch,len,rate) { super(); this.length=len||44100; }
-  startRendering() { return Promise.resolve(this.createBuffer(2,this.length,44100)); }
+  constructor(ch, len, rate) {
+    super();
+    // Honor the ctor arg rather than inheriting the random fp sampleRate.
+    if (rate) this.sampleRate = rate;
+    this.length = len || 44100;
+    this.numberOfChannels = ch || 1;
+  }
+  startRendering() { return Promise.resolve(this.createBuffer(this.numberOfChannels, this.length, this.sampleRate)); }
 };
 globalThis.webkitAudioContext = globalThis.AudioContext;
 
