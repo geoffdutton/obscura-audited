@@ -2578,40 +2578,92 @@ Element.prototype.getContext = function getContext(type) {
     return this._ctx;
   }
   if (type === 'webgl' || type === 'experimental-webgl' || type === 'webgl2') {
-    return {
+    const VERSION_STR = type === 'webgl2'
+      ? 'WebGL 2.0 (OpenGL ES 3.0 Chromium)'
+      : 'WebGL 1.0 (OpenGL ES 2.0 Chromium)';
+    const SHADING_STR = type === 'webgl2'
+      ? 'WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)'
+      : 'WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)';
+    const attrs = {
+      alpha: true, antialias: true, depth: true, failIfMajorPerformanceCaveat: false,
+      powerPreference: 'default', premultipliedAlpha: true, preserveDrawingBuffer: false,
+      stencil: false, desynchronized: false, xrCompatible: false,
+    };
+    const noop = () => {};
+    const stubFns = [
+      'uniform1f','uniform2f','uniform3f','uniform4f',
+      'uniform1i','uniform2i','uniform3i','uniform4i',
+      'uniform1fv','uniform2fv','uniform3fv','uniform4fv',
+      'uniform1iv','uniform2iv','uniform3iv','uniform4iv',
+      'uniformMatrix2fv','uniformMatrix3fv','uniformMatrix4fv',
+      'vertexAttrib1f','vertexAttrib2f','vertexAttrib3f','vertexAttrib4f',
+      'blendFuncSeparate','blendEquation','blendEquationSeparate','blendColor',
+      'stencilFunc','stencilFuncSeparate','stencilOp','stencilOpSeparate','stencilMask','stencilMaskSeparate',
+      'cullFace','frontFace','lineWidth','polygonOffset','colorMask','depthMask','depthRange','scissor',
+      'bindRenderbuffer','renderbufferStorage','framebufferRenderbuffer',
+      'detachShader','deleteShader','deleteProgram','deleteBuffer','deleteTexture','deleteFramebuffer','deleteRenderbuffer',
+      'bufferSubData','drawBuffers','copyTexImage2D','copyTexSubImage2D','texSubImage2D',
+      'compressedTexImage2D','compressedTexSubImage2D',
+      'hint','flush','finish',
+    ];
+    const gl = {
       canvas: this,
+      drawingBufferWidth: this.width || 300,
+      drawingBufferHeight: this.height || 150,
+      getContextAttributes() { return { ...attrs }; },
       getExtension(name) {
         if (name === 'WEBGL_debug_renderer_info') return { UNMASKED_VENDOR_WEBGL: 0x9245, UNMASKED_RENDERER_WEBGL: 0x9246 };
+        if (name === 'EXT_texture_filter_anisotropic') return { TEXTURE_MAX_ANISOTROPY_EXT: 0x84FE, MAX_TEXTURE_MAX_ANISOTROPY_EXT: 0x84FF };
         return null;
       },
       getParameter(pname) {
         if (pname === 0x9245) return _fp('gpuVendor');
         if (pname === 0x9246) return _fp('gpu');
-        if (pname === 0x1F01) return 'WebKit WebGL';  // GL_RENDERER
-        if (pname === 0x1F00) return 'WebKit';          // GL_VENDOR
-        if (pname === 0x1F02) return 'OpenGL ES 3.0 (ANGLE)'; // GL_VERSION
-        if (pname === 0x8B8C) return 'WebGL GLSL ES 3.00 (ANGLE)'; // GL_SHADING_LANGUAGE_VERSION
+        if (pname === 0x1F00) return 'WebKit';                // GL_VENDOR
+        if (pname === 0x1F01) return 'WebKit WebGL';          // GL_RENDERER
+        if (pname === 0x1F02) return VERSION_STR;             // GL_VERSION — must be a string
+        if (pname === 0x8B8C) return SHADING_STR;             // GL_SHADING_LANGUAGE_VERSION
+        if (pname === 0x0D33) return 16384;                   // MAX_TEXTURE_SIZE
+        if (pname === 0x8869) return 16;                      // MAX_VERTEX_ATTRIBS
+        if (pname === 0x8B4C) return 16;                      // MAX_VERTEX_TEXTURE_IMAGE_UNITS
+        if (pname === 0x8872) return 16;                      // MAX_TEXTURE_IMAGE_UNITS
+        if (pname === 0x84E2) return 16;                      // MAX_COMBINED_TEXTURE_IMAGE_UNITS
         return 0;
       },
-      getSupportedExtensions() { return ['WEBGL_debug_renderer_info','EXT_texture_filter_anisotropic','WEBGL_compressed_texture_s3tc','WEBGL_lose_context']; },
+      getSupportedExtensions() {
+        return ['ANGLE_instanced_arrays','EXT_blend_minmax','EXT_color_buffer_half_float','EXT_disjoint_timer_query',
+          'EXT_float_blend','EXT_frag_depth','EXT_shader_texture_lod','EXT_texture_filter_anisotropic',
+          'OES_element_index_uint','OES_fbo_render_mipmap','OES_standard_derivatives','OES_texture_float',
+          'OES_texture_float_linear','OES_texture_half_float','OES_texture_half_float_linear','OES_vertex_array_object',
+          'WEBGL_color_buffer_float','WEBGL_compressed_texture_s3tc','WEBGL_compressed_texture_s3tc_srgb',
+          'WEBGL_debug_renderer_info','WEBGL_debug_shaders','WEBGL_depth_texture','WEBGL_draw_buffers','WEBGL_lose_context'];
+      },
       getShaderPrecisionFormat() { return { rangeMin: 127, rangeMax: 127, precision: 23 }; },
       createBuffer() { return {}; }, createShader() { return {}; }, createProgram() { return {}; },
-      shaderSource() {}, compileShader() {}, attachShader() {}, linkProgram() {},
-      getProgramParameter() { return true; }, useProgram() {}, deleteShader() {},
-      bindBuffer() {}, bufferData() {}, enableVertexAttribArray() {}, vertexAttribPointer() {},
-      drawArrays() {}, drawElements() {}, viewport() {}, clear() {}, clearColor() {},
-      enable() {}, disable() {}, blendFunc() {}, depthFunc() {},
+      createRenderbuffer() { return {}; },
+      shaderSource: noop, compileShader: noop, attachShader: noop, linkProgram: noop,
+      getProgramParameter() { return true; }, getShaderParameter() { return true; },
+      useProgram: noop,
+      bindBuffer: noop, bufferData: noop,
+      enableVertexAttribArray: noop, vertexAttribPointer: noop,
+      drawArrays: noop, drawElements: noop, viewport: noop,
+      clear: noop, clearColor: noop, clearDepth: noop, clearStencil: noop,
+      enable: noop, disable: noop, blendFunc: noop, depthFunc: noop,
       getUniformLocation() { return {}; }, getAttribLocation() { return 0; },
-      uniform1f() {}, uniform1i() {}, uniformMatrix4fv() {},
-      createTexture() { return {}; }, bindTexture() {}, texImage2D() {}, texParameteri() {},
-      activeTexture() {}, pixelStorei() {}, generateMipmap() {},
-      createFramebuffer() { return {}; }, bindFramebuffer() {}, framebufferTexture2D() {},
-      readPixels(x,y,w,h,f,t,d) { if(d) for(let i=0;i<d.length;i++) d[i]=Math.floor(Math.random()*256); },
+      createTexture() { return {}; }, bindTexture: noop, texImage2D: noop, texParameteri: noop, texParameterf: noop,
+      activeTexture: noop, pixelStorei: noop, generateMipmap: noop,
+      createFramebuffer() { return {}; }, bindFramebuffer: noop, framebufferTexture2D: noop,
+      readPixels(x,y,w,h,f,t,d) { if(d) for(let i=0;i<d.length;i++) d[i] = Math.floor(_fpRand(800+i)*256); },
       VERTEX_SHADER: 0x8B31, FRAGMENT_SHADER: 0x8B30, LINK_STATUS: 0x8B82,
       ARRAY_BUFFER: 0x8892, STATIC_DRAW: 0x88E4, FLOAT: 0x1406,
       TRIANGLES: 0x0004, COLOR_BUFFER_BIT: 0x4000, DEPTH_BUFFER_BIT: 0x100,
       TEXTURE_2D: 0x0DE1, RGBA: 0x1908, UNSIGNED_BYTE: 0x1401,
+      VERSION: 0x1F02, SHADING_LANGUAGE_VERSION: 0x8B8C, VENDOR: 0x1F00, RENDERER: 0x1F01,
+      MAX_TEXTURE_SIZE: 0x0D33, MAX_VERTEX_ATTRIBS: 0x8869,
+      UNPACK_FLIP_Y_WEBGL: 0x9240, UNPACK_PREMULTIPLY_ALPHA_WEBGL: 0x9241,
     };
+    for (const name of stubFns) gl[name] = noop;
+    return gl;
   }
   return null;
 };

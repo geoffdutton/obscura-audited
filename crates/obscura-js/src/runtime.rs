@@ -2155,4 +2155,69 @@ mod tests {
             serde_json::json!(true)
         );
     }
+
+    #[test]
+    fn test_webgl_has_uniform2f_and_attributes() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let result = rt
+            .evaluate(
+                r#"(function() {
+                    const gl = document.createElement('canvas').getContext('webgl');
+                    return {
+                        u2f: typeof gl.uniform2f,
+                        u3f: typeof gl.uniform3f,
+                        u4f: typeof gl.uniform4f,
+                        attrs: typeof gl.getContextAttributes,
+                    };
+                })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!({ "u2f": "function", "u3f": "function", "u4f": "function", "attrs": "function" })
+        );
+    }
+
+    #[test]
+    fn test_webgl_version_is_string() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let v = rt
+            .evaluate(
+                r#"(function() {
+                    const gl = document.createElement('canvas').getContext('webgl');
+                    return gl.getParameter(gl.VERSION);
+                })()"#,
+            )
+            .unwrap();
+        let s = v.as_str().expect("VERSION must be a string");
+        assert!(
+            s.to_lowercase().contains("webgl") || s.to_lowercase().contains("opengl"),
+            "VERSION must mention WebGL or OpenGL: {}",
+            s
+        );
+    }
+
+    #[test]
+    fn test_webgl_context_attributes_shape() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let attrs = rt
+            .evaluate(
+                r#"(function() {
+                    const gl = document.createElement('canvas').getContext('webgl');
+                    return gl.getContextAttributes();
+                })()"#,
+            )
+            .unwrap();
+        let obj = attrs.as_object().expect("attributes must be an object");
+        for key in &[
+            "alpha",
+            "depth",
+            "stencil",
+            "antialias",
+            "premultipliedAlpha",
+            "preserveDrawingBuffer",
+        ] {
+            assert!(obj.contains_key(*key), "missing attribute: {}", key);
+        }
+    }
 }
