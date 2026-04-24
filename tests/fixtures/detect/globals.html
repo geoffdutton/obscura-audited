@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><title>detecting</title></head>
+<body>
+<script>
+  const leaks = Object.getOwnPropertyNames(window).filter(k =>
+    /^_fp|^_mark|^_wrap|^_resolveUrl|^_registerIframe|obscura/i.test(k));
+  document.title = JSON.stringify({
+    webdriver_in_nav: 'webdriver' in navigator,
+    deno_typeof: typeof Deno,
+    bootstrap_leaks: leaks,
+  });
+</script>
+</body>
+</html>

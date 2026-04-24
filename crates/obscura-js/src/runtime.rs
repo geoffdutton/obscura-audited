@@ -830,6 +830,43 @@ mod tests {
         rt
     }
 
+    // --- Rule 1: globals leak (Red → Green tests) ---
+
+    #[test]
+    fn test_no_webdriver_in_navigator() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let v = rt.evaluate("'webdriver' in navigator").unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!(false),
+            "navigator.webdriver must not exist"
+        );
+    }
+
+    #[test]
+    fn test_no_deno_global_after_init() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let v = rt.evaluate("typeof Deno").unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!("undefined"),
+            "Deno must be gone after init"
+        );
+    }
+
+    #[test]
+    fn test_no_bootstrap_globals_leak() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        let v = rt.evaluate(
+            "Object.getOwnPropertyNames(window).filter(k => /^_fp|^_mark|^_wrap|^_resolveUrl|^_registerIframe|obscura/i.test(k)).length"
+        ).unwrap();
+        assert_eq!(
+            v.as_f64().unwrap_or(-1.0) as i64,
+            0,
+            "bootstrap internals must not appear on window"
+        );
+    }
+
     #[test]
     fn test_document_title() {
         let mut rt = setup_runtime("<html><head><title>Test</title></head><body></body></html>");
