@@ -72,6 +72,11 @@ see `docs/bot-detection-audit.md` before editing:
 - `docs/bot-detection-audit.md` — stealth effectiveness, known fingerprint leaks.
 - `.github/workflows/release.yml` — tag-triggered release (push `v*` tag).
   Uses SHA-pinned actions + `attest-build-provenance`. Don't regress to tag pins.
+- `.github/workflows/ci.yml` — per-PR gate: fmt + clippy + test + build on
+  Linux/macOS/Windows. `--features stealth` only builds on Linux (wreq RC pulls
+  in platform-specific TLS). Path-gated to skip on docs-only changes; if you
+  add a new source path outside `crates/` or `Cargo.{toml,lock}`, extend the
+  `paths:` filter so CI still runs.
 - `crates/obscura-js/js/bootstrap.js` — 124KB, most fingerprint logic lives here.
 - `crates/obscura-cdp/src/server.rs` — CDP WebSocket server, 127.0.0.1-only bind.
 
